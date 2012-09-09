@@ -571,7 +571,7 @@ class Raw(object):
         Parameters
         ----------
         fname : string
-            File name of the new dataset. Caveat! It heas to be a new file name.
+            File name of the new dataset. Caveat! A new file name is required.
 
         picks : list of int
             Indices of channels to include
@@ -591,7 +591,8 @@ class Raw(object):
 
         """
         if fname == self.info['filename']:
-            raise RuntimeError('Invalid operation. Please use an alternative file name!')
+            raise RuntimeError('Invalid operation. '
+                               'Please use an alternative file name!')
 
         if self._preloaded:
             if np.iscomplexobj(self._data):
