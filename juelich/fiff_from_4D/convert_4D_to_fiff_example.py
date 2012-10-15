@@ -6,7 +6,6 @@
 
 import mne
 from fiff_handler import RawFrom4D
-from mne.fiff import Raw
 from ConfigParser import ConfigParser
 
 hdr_4D = 'mydata.hdr'
