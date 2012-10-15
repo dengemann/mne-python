@@ -6,18 +6,15 @@
 
 import mne
 from fiff_handler import RawFrom4D
-from ConfigParser import ConfigParser
 
 hdr_4D = 'mydata.hdr'
-
-parser = ConfigParser()
-parser.read(hdr_4D)
 
 raw = RawFrom4D(hdr_4D)
 
 events = mne.find_events(raw)
 
-picks = mne.fiff.pick_types(raw.info, meg=True, stim=False, ecg=True, eog=True, exclude=raw.info['ch_names'][248:271] + ['UCA 001'])
+picks = mne.fiff.pick_types(raw.info, meg=True, stim=False, ecg=True, eog=True,
+                            exclude=raw.info['ch_names'][248:271] + ['UCA 001'])
 
 event_id = 999
 ev = mne.merge_events(events, [53, 73, 55, 75, 54, 74, 56, 76], event_id)
