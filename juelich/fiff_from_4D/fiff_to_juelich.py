@@ -69,16 +69,28 @@ def write_hdr(raw, fname, study_name, pat_id, dtype='float',
 
     # name index label no group scale unit min max
     mappings = []
+    count_meg = 1
+    count_eeg = 1
+    count_trig = 1
+
     for i, ch in enumerate(info['chs']):
         name = ch['ch_name'].upper()
         if name.startswith('MEG'):
+            count_meg += 1
             group = 1
+            name = 'A' + str(count_meg)
         elif name.startswith('EEG'):
+            count_eeg += 1
             group = 2
+            name = 'E' + str(count_eeg)
         elif name[:3] in ('EOG', 'ECG'):
+            count_eeg += 1
             group = 4
+            name = 'E' + str(count_eeg)
         elif name.startswith('STI'):
+            count_trig += 1
             group = 6
+            name = 'T' + str(count_trig)
 
         value = [str(i), name, '0', str(group), str(ch['cal']),
                  str(ch['unit']), '0', '0']
@@ -87,10 +99,12 @@ def write_hdr(raw, fname, study_name, pat_id, dtype='float',
 
     S['CHANNEL INFO'] = mappings
 
-    noisy_ch_idx = ', '.join([str(info['ch_names'].index(bad))
-                                for bad in info['bads']])
-    S['NOISY CHANNELS'] = [('name', ', '.join(raw.info['bads'])),
-                           ('index', noisy_ch_idx)]
+    noisy_ch_idx = [str(info['ch_names'].index(bad))
+                                for bad in info['bads']]
+    noisy_ch_names = [mappings[int(i)][0] for i in noisy_ch_idx]
+
+    S['NOISY CHANNELS'] = [('name', ', '.join(noisy_ch_names)),
+                           ('index', ', '.join(noisy_ch_idx))]
 
     for section, mappings in S.items():
         for name, value in mappings:
