@@ -329,6 +329,20 @@ class RawFromJuelich(Raw):
 
 class RawFrom4D(RawFromJuelich):
     """ intializes object from 4D asicii exported data
+
+    Parameters
+    ----------
+    hdr_fname : str
+        absolute path to asii header as drawn from msi 'export_data'
+    data_fname : str
+        absolute path to asii data as drawn from msi 'export_data'
+    head_shape_fname : str
+        absolute path to asii headshape as drawn from msi 'print_hs_file'
+    data : boolean | array-like
+        if array-like custom data matching the header info to be used
+        instead of the data from data_fname
+    sep : str
+        seperator used for dates.
     """
     def __init__(self, hdr_fname, data_fname, head_shape_fname, data=None,
                  sep='-'):
