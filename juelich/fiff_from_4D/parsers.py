@@ -107,3 +107,6 @@ class BtiParser(Bunch):
             info[BTI4D.HDR_CH_TRANS] = sensor_trans
 
         self.info = info
+        tsl, duration = self._raw_parsed['LONGEST EPOCH'][0].split(', ')
+        self['FILEINFO']['Time slices'] = tsl.split(': ')[1]
+        self['FILEINFO']['Total duration'] = duration.strip()
