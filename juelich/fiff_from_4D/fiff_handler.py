@@ -416,8 +416,7 @@ class RawFrom4D(RawFromJuelich):
         info['dig'] = []
 
         try:  # TODO
-            head_shape = op.join(self._root, self.hdr_4D.get("GLOBAL",
-                                                             "head_shape"))
+            head_shape = self.head_shape_fname
             with open(head_shape) as f:
                 dig_points = [np.array(l.strip().split(), dtype=np.float32)
                           for l in f.readlines() if not l.startswith("#")]
