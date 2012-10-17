@@ -323,7 +323,7 @@ class RawFromJuelich(Raw):
                 count_ref_grad += 1
                 name = "RFG 00%i" % count_ref_grad
             renamed.append(name)
-        return renamed
+        return names, renamed
 
 
 class RawFrom4D(RawFromJuelich):
@@ -338,6 +338,7 @@ class RawFrom4D(RawFromJuelich):
         self._root, self._hdr_name = op.split(hdr_fname)
         self._data_file = data_fname
         self.head_shape_fname = head_shape_fname
+        self.sep = sep
 
         print ("Initializing RawObject from custom 4D data " +
                "file %s ..." % self._data_file)
@@ -386,13 +387,15 @@ class RawFrom4D(RawFromJuelich):
                                 enumerate(self.hdr["CHANNEL LABELS"])])
         ch_names = channels_4D[:, 0].tolist()
         ch_lognos = channels_4D[:, 1].tolist()
-        info['ch_names'] = self._rename_4D_channels(ch_names)
+        info['ch_names'] = self._rename_4D_channels(ch_names)[1]
+        ch_mapping = dict(zip(* self._rename_4D_channels(ch_names)))
         meg_channels = [n for n in info['ch_names'] if n.startswith('MEG')]
         ref_magnetometers = [n for n in info['ch_names'] if n.startswith('RFM')]
         ref_gradiometers = [n for n in info['ch_names'] if n.startswith('RFG')]
         print meg_channels[:5], ref_magnetometers[:5], ref_gradiometers[:5]
 
-        sensor_trans = self.hdr['CHANNEL XFM']
+        sensor_trans = dict((ch_mapping[k], v) for k, v in
+                            self.hdr['CHANNEL XFM'].items())
         print sensor_trans.keys()[0:5]
 
         info['bads'] = []  # TODO

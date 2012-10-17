@@ -29,7 +29,7 @@ BTI4D.HDR_CH_GROUPS = 'CHANNEL GROUPS'
 BTI4D.HDR_CH_TRANS = 'CHANNEL XFM'
 
 
-class BtiParser(Bunch):
+class BtiParser(object):
     """BTI Magnes 3600 HEader Parser
     """
     def __init__(self, bti_info):
@@ -107,6 +107,13 @@ class BtiParser(Bunch):
             info[BTI4D.HDR_CH_TRANS] = sensor_trans
 
         self.info = info
+        self.info = info
         tsl, duration = self._raw_parsed['LONGEST EPOCH'][0].split(', ')
         self['FILEINFO']['Time slices'] = tsl.split(': ')[1]
         self['FILEINFO']['Total duration'] = duration.strip()
+
+    def __getitem__(self, item):
+        return self.info.__getitem__(item)
+
+    def __setitem__(self, *args):
+        return self.info.__setitem__(*args)
