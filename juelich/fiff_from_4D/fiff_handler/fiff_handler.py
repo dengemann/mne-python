@@ -77,6 +77,7 @@ class RawFromJuelich(Raw):
             print 'Ready.'
         self.fid = None
         self._preloaded = True
+        self._projectors = []
         self._times = np.arange(self.first_samp,
             self.last_samp + 1) / info['sfreq']
 
@@ -368,6 +369,8 @@ class RawFrom4D(RawFromJuelich):
         self._preloaded = True
         self._times = np.arange(self.first_samp,
             self.last_samp + 1) / info['sfreq']
+        self._projectors = [None]
+        self._projector_hashes = [None]
 
     def _create_raw_info(self):
         """ Fills list of dicts for initializing empty fiff with 4D data
@@ -413,6 +416,7 @@ class RawFrom4D(RawFromJuelich):
         except:
             print "Could not find the head to MR matrix." \
                   "\n I'm skipping this step."
+            info['dev_head_t'] = None
 
         info['meas_id'] = None  # dict(machid=None, secs=None, usecs=None,
             # version=None) # if needed, supply info layrt on
