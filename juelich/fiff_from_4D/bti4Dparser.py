@@ -4,6 +4,8 @@
 #
 #         simplified bsd-3 license
 
+#  Bunch class taken from mne.fiff
+
 
 class Bunch(dict):
     """ Container object for datasets: dictionnary-like object that
@@ -38,17 +40,17 @@ class BtiParser(object):
     def _parse(self):
         f = open(self.bti_info, "r").read()
         info = [l for l in f.split("\n") if not l.startswith("#")]
-        raw_parsed = {}
+        self._raw_parsed = {}
         current_key = None
         for line in info:
             if line.isupper() and line.endswith(":"):
                 current_key = line.strip(":")
-                raw_parsed[current_key] = []
+                self._raw_parsed[current_key] = []
             else:
-                raw_parsed[current_key].append(line)
+                self._raw_parsed[current_key].append(line)
 
         info = {}
-        for field, params in raw_parsed.items():
+        for field, params in self._raw_parsed.items():
             if field in [BTI4D.HDR_FILEINFO, BTI4D.HDR_CH_NAMES,
                          BTI4D.HDR_DATAFILE]:
                 if field == BTI4D.HDR_DATAFILE:
@@ -59,37 +61,37 @@ class BtiParser(object):
                     sep = None
                 mapping = [i.strip().split(sep) for i in params]
                 mapping = [(k.strip(), v.strip()) for k, v in mapping]
+
                 if field == BTI4D.HDR_CH_NAMES:
                     info[field] = mapping
                 else:
                     info[field] = dict(mapping)
 
             if field == BTI4D.HDR_CH_GROUPS:
+                ch_groups = {}
                 for p in params:
-                    ch_groups = {}
                     if p.endswith("channels"):
-                        ch_groups['n_ch'] = int(p.strip().split(' ')[0])
+                        ch_groups['CHANNELS'] = int(p.strip().split(' ')[0])
                     elif "MEG" in p:
-                        ch_groups['n_meg_ch'] = int(p.strip().split(' ')[0])
+                        ch_groups['MEG'] = int(p.strip().split(' ')[0])
                     elif "REFERENCE" in p:
-                        ch_groups['n_ref_ch'] = int(p.strip().split(' ')[0])
+                        ch_groups['REF'] = int(p.strip().split(' ')[0])
                     elif "EEG" in p:
-                        ch_groups['n_eeg_ch'] = int(p.strip().split(' ')[0])
+                        ch_groups['EEG'] = int(p.strip().split(' ')[0])
                     elif "TRIGGER" in p:
-                        ch_groups['n_trigger_ch'] = int(p.strip().split(' ')[0])
+                        ch_groups['TRIGGER'] = int(p.strip().split(' ')[0])
                     elif "UTILITY" in p:
-                        ch_groups['n_misc_ch'] = int(p.strip().split(' ')[0])
-                info[field] = ch_groups
+                        ch_groups['UTILITY'] = int(p.strip().split(' ')[0])
+                info[BTI4D.HDR_CH_GROUPS] = ch_groups
             elif field == BTI4D.HDR_CH_CAL:
                 ch_cal = []
                 ch_fields = ["ch_name", "group", "cal", "unit"]
                 for p in params:
                     this_ch_info = p.strip().split()
                     ch_cal.append(dict(zip(ch_fields, this_ch_info)))
+                info[BTI4D.HDR_CH_CAL] = ch_cal
 
-            self.info = info
-
-        for field, params in raw_parsed.items():
+        for field, params in self._raw_parsed.items():
             if field == BTI4D.HDR_CH_TRANS:
                 sensor_trans = {}
                 idx = 0
@@ -97,10 +99,11 @@ class BtiParser(object):
                     if "|" in p:
                         k, d, _ = p.strip().split("|")
                         if k.strip().isalnum():
-                            # don't take the names from the file, go whith the renamed
-                            # cave, this will break as the file strucutre changes
-                            current_chan = info[BTI4D.HDR_CH_NAMES][idx][1]  # k.strip()
+                            current_chan = info[BTI4D.HDR_CH_NAMES][idx][0]  # k.strip()
                             sensor_trans[current_chan] = d.strip()
                             idx += 1
                         else:
                             sensor_trans[current_chan] += ", " + d.strip()
+            info[BTI4D.HDR_CH_TRANS] = sensor_trans
+
+        self.info = info
