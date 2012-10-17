@@ -1,3 +1,10 @@
+#!/usr/bin/env python
+
+# Author: Denis A. Engemann  <d.engemann@fz-juelich.de>
+#
+#         simplified bsd-3 license
+
+
 from mne.fiff.constants import FIFF
 from mne.fiff.raw import Raw
 from ConfigParser import ConfigParser
