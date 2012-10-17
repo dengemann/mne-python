@@ -329,13 +329,15 @@ class RawFromJuelich(Raw):
 class RawFrom4D(RawFromJuelich):
     """ intializes object from 4D asicii exported data
     """
-    def __init__(self, hdr_fname, dat_fname, data=None, sep='-'):
+    def __init__(self, hdr_fname, data_fname, head_shape_fname, data=None,
+                 sep='-'):
         """ Alternative fiff file constructor
         """
         # intitalize configparser for Juelich-4D header file
         self.hdr = BtiParser(hdr_fname)
         self._root, self._hdr_name = op.split(hdr_fname)
-        self._data_file = dat_fname
+        self._data_file = data_fname
+        self.head_shape_fname = head_shape_fname
 
         print ("Initializing RawObject from custom 4D data " +
                "file %s ..." % self._data_file)
