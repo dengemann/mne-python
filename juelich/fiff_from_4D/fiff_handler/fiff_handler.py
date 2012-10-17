@@ -460,6 +460,7 @@ class RawFrom4D(RawFromJuelich):
         info['filename'] = None  # set later on
         info['ctf_head_t'] = None  # ok like that
         info['dev_ctf_t'] = []  # ok like that
+        info['filenames'] = []
         chs = []
 
         for idx, (chan, logno) in enumerate(zip(info['ch_names'], ch_lognos)):
