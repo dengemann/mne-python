@@ -1,6 +1,7 @@
 from mne.fiff.constants import FIFF
 from mne.fiff.raw import Raw
 from ConfigParser import ConfigParser
+from .parsers import BtiParser
 import time
 import os.path as op
 from datetime import datetime
@@ -21,18 +22,8 @@ ROT_NMAG = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]])
 LOC_TO_COIL = ((0, 3), (1, 3), (2, 3), (0, 0), (1, 0), (2, 0), (0, 1), (1, 1),
                (0, 2), (2, 1), (1, 2), (2, 2))
 
-# def adjust_zeros(c):
-#     name,num = c
-#     if len(num) == 2:
-#         num =  "0" + num
-#     elif len(num) < 2:
-#         num = "00" + num
-#     else:
-#         pass
-#     return " ".join([name, num])
 
-
-class RawFrom4D(Raw):
+class RawFromJuelich(Raw):
     """Alternative Constructor for Raw object
 
     Parameters
@@ -269,7 +260,7 @@ class RawFrom4D(Raw):
         """ transforms 4D coil position to fiff / Neuromag
         """
         # get the geometries
-        geom_4D = np.array(channel_pos_4D.split(", ")[:12], dtype=np.float32)
+        geom_4D = np.array(channel_pos_4D.split(', ')[:12], dtype=np.float32)
         # reshape for convenience
         geom_4D = geom_4D.reshape([3, 4])
         # get rotation as vector
@@ -335,7 +326,201 @@ class RawFrom4D(Raw):
         return renamed
 
 
-class RawMerged(RawFrom4D):
+class RawFrom4D(RawFromJuelich):
+    """ intializes object from 4D asicii exported data
+    """
+    def __init__(self, hdr_fname, dat_fname, data=None, sep='-'):
+        """ Alternative fiff file constructor
+        """
+        # intitalize configparser for Juelich-4D header file
+        self.hdr = BtiParser(hdr_fname)
+        self._root, self._hdr_name = op.split(hdr_fname)
+        self._data_file = dat_fname
+
+        print ("Initializing RawObject from custom 4D data " +
+               "file %s ..." % self._data_file)
+        info = self._create_raw_info()
+        self.info = info
+
+        self._data = self._read_4D_data() if not data else data
+        self.first_samp, self.last_samp = 0, self._data.shape[1] - 1
+        cals = np.zeros(info['nchan'])
+        for k in range(info['nchan']):
+            cals[k] = info['chs'][k]['range'] * \
+                      info['chs'][k]['cal']
+
+        self.cals = cals
+        self.rawdir = None
+        self.proj = None
+        self.comp = None
+
+        self.verbose = True
+        if self.verbose:
+            print '    Range : %d ... %d =  %9.3f ... %9.3f secs' % (
+                       self.first_samp, self.last_samp,
+                       float(self.first_samp) / info['sfreq'],
+                       float(self.last_samp) / info['sfreq'])
+            print 'Ready.'
+        self.fid = None
+        self._preloaded = True
+        self._times = np.arange(self.first_samp,
+            self.last_samp + 1) / info['sfreq']
+
+    def _create_raw_info(self):
+        """ Fills list of dicts for initializing empty fiff with 4D data
+        """
+        # intialize to_fiff info dicitonary and populate it
+        info = {}
+        sep = self.sep
+        d = datetime.strptime(self.hdr['DATAFILE']['Session'],
+                              '%d' + sep + '%y' + sep + '%m %H:%M')
+        sec = time.mktime(d.timetuple())
+        info['projs'] = []
+        info['comps'] = []
+        info['meas_date'] = np.array([sec, 0], dtype=np.int32)
+        info['sfreq'] = float(self.hdr["FILEINFO"]["Sample Frequency"][:-2])
+        info['nchan'] = int(self.hdr["CHANNEL GROUPS"]["CHANNELS"])
+        channels_4D = np.array([(e[0], i + 1) for i, e in
+                                enumerate(self.hdr["CHANNEL LABELS"])])
+        ch_names = channels_4D[:, 0].tolist()
+        ch_lognos = channels_4D[:, 1].tolist()
+        info['ch_names'] = self._rename_4D_channels(ch_names)
+        meg_channels = [n for n in info['ch_names'] if n.startswith('MEG')]
+        ref_magnetometers = [n for n in info['ch_names'] if n.startswith('RFM')]
+        ref_gradiometers = [n for n in info['ch_names'] if n.startswith('RFG')]
+        print meg_channels[:5], ref_magnetometers[:5], ref_gradiometers[:5]
+
+        sensor_trans = self.hdr['CHANNEL XFM']
+        print sensor_trans.keys()[0:5]
+
+        info['bads'] = []  # TODO
+
+        try:  # TODO
+            head2mr = op.join(self._root, self.hdr_4D.get("GLOBAL", "meg2mr"))
+            info['dev_head_t'] = {'from': FIFF.FIFFV_COORD_HEAD,
+                                  'to': FIFF.FIFFV_COORD_MRI}
+            with open(head2mr, "r") as f:
+                h2m_trans = np.array([l.strip().split() for l in
+                                      f.readlines()[:4]]).astype(np.float32)
+                dev_head_t = np.vstack([np.roll(h2m_trans.T, 1, 1),
+                                       [0, 0, 0, 1]])
+                info['dev_head_t']['trans'] = dev_head_t
+        except:
+            print "Could not find the head to MR matrix." \
+                  "\n I'm skipping this step."
+
+        info['meas_id'] = None  # dict(machid=None, secs=None, usecs=None,
+            # version=None) # if needed, supply info layrt on
+        info['file_id'] = None  # dict(machid=None, secs=None, usecs=None,
+            # version=None) #ok
+        info['dig'] = []
+
+        try:  # TODO
+            head_shape = op.join(self._root, self.hdr_4D.get("GLOBAL",
+                                                             "head_shape"))
+            with open(head_shape) as f:
+                dig_points = [np.array(l.strip().split(), dtype=np.float32)
+                          for l in f.readlines() if not l.startswith("#")]
+
+        except:
+            print "Could not find the head shape file." \
+                  "\n I'm skipping this step"
+            dig_points = None
+
+        if dig_points:
+            fiducials_idents = (0, 1, 2, 0, 1)
+            for idx, point in enumerate(dig_points):
+                point_info = self._init_dig_info()
+                point_info['r'] = point
+                if idx < 3:
+                    point_info['kind'] = FIFF.FIFFV_POINT_CARDINAL
+                    point_info['ident'] = fiducials_idents[idx]
+                if 2 < idx < 5:
+                    point_info['kind'] = FIFF.FIFFV_POINT_HPI
+                    point_info['ident'] = fiducials_idents[idx]
+                elif idx > 4:
+                    point_info['kind'] = FIFF.FIFFV_POINT_EXTRA
+                    point_info['ident'] = idx - len(fiducials_idents)
+                info['dig'].append(point_info)
+
+        try:  # TODO
+            fspec = self.hdr_4D.get('DATAFILE', 'PDF').split(',')[2].split('ord')[0]
+            ffreqs = fspec.replace('fwsbp', '').split("-")
+        except:
+            print "Cannot read any filter specifications." \
+                  "\n No filter info will be set."
+            ffreqs = 0, 300
+
+        info['highpass'], info['lowpass'] = ffreqs
+        info['acq_pars'], info['acq_stim'] = None, None  # both ok
+        info['filename'] = None  # set later on
+        info['ctf_head_t'] = None  # ok like that
+        info['dev_ctf_t'] = []  # ok like that
+        chs = []
+
+        for idx, (chan, logno) in enumerate(zip(info['ch_names'], ch_lognos)):
+            chan_info = self._init_chan_info()
+            chan_info['ch_name'] = chan
+            chan_info['logno'] = logno
+            chan_info['scanno'] = idx + 1
+
+            if chan in meg_channels + ref_magnetometers + ref_gradiometers:
+                chan_info['loc'] = self._get_loc(sensor_trans[chan])
+                coil_trans = np.zeros([4, 4])
+                for i, loc in enumerate(chan_info['loc']):
+                    coil_trans[LOC_TO_COIL[i]] = loc
+                coil_trans[3, 3] = 1.
+                chan_info['coil_trans'] = coil_trans
+
+            if chan in meg_channels:
+                chan_info['kind'] = FIFF.FIFFV_MEG_CH
+                chan_info['coil_type'] = FIFF.FIFFV_COIL_MAGNES_MAG
+                chan_info['coord_frame'] = FIFF.FIFFV_COORD_HEAD
+                chan_info['unit'] = FIFF.FIFF_UNIT_T
+
+            elif chan in ref_magnetometers:
+                chan_info['kind'] = FIFF.FIFFV_REF_MEG_CH
+                chan_info['coil_type'] = FIFF.FIFFV_COIL_POINT_MAGNETOMETER
+                chan_info['coord_frame'] = FIFF.FIFFV_COORD_DEVICE
+                chan_info['unit'] = FIFF.FIFF_UNIT_T
+
+            elif chan in ref_gradiometers:
+                chan_info['kind'] = FIFF.FIFFV_REF_MEG_CH
+                chan_info['coil_type'] = FIFF.FIFFV_COIL_AXIAL_GRAD_5CM
+                chan_info['coord_frame'] = FIFF.FIFFV_COORD_DEVICE
+                chan_info['unit'] = FIFF.FIFF_UNIT_T_M
+
+            elif chan in "STI 014":
+                chan_info['kind'] = FIFF.FIFFV_STIM_CH
+            elif chan in ("EOG 001", "EOG 002"):
+                chan_info['kind'] = FIFF.FIFFV_EOG_CH
+            elif chan in "ECG 001":
+                chan_info['kind'] = FIFF.FIFFV_ECG_CH
+            elif chan in "RSP 001":
+                chan_info['kind'] = FIFF.FIFFV_RESP_CH
+
+            # other channels implicitly covered
+            chs.append(chan_info)
+
+        info['chs'] = chs
+        return info
+
+    def _read_4D_data(self, count=-1, dtype=np.float32):
+        """ Reads data from the Juelich 4D format
+        """
+        ntsl = int(self.hdr['FILEINFO']['Time slices'].replace(' slices', ''))
+        cnt, dtp = count, dtype
+        with open(self._data_file, 'rb') as f:
+            data = np.fromfile(file=f, dtype=dtp,
+                               count=cnt).reshape((ntsl,
+                                                   self.info['nchan']))
+            data[:, :248] *= 1e-15  # put data in Tesla
+            #TODO Gradiometers?
+            data[:, 253:271] *= 1e-15  # put data in Tesla
+        return data.T
+
+
+class RawMerged(RawFromJuelich):
     """ initializes object from exisiting and custom raw data
     """
     def __init__(self, raw_fname, hdr_4D):
