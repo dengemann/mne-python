@@ -449,7 +449,7 @@ class RawFrom4D(RawFromJuelich):
             head_shape = self.head_shape_fname
             with open(head_shape) as f:
                 dig_points = [np.array(l.strip().split(), dtype=np.float32)
-                          for l in f.readlines() if not l.startswith("#")]
+                          for l in f.readlines() if l.startswith(' ')]
 
         except:
             print "Could not find the head shape file." \
