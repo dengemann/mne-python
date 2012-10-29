@@ -263,7 +263,7 @@ class ICA(object):
         sort_func : function
             Function used for sorting the sources. It should take an
             array and an axis argument.
-        concatenate : boolean
+        concatenate : bool
             If true, epochs and time slices will be concatenated.
 
         Returns
@@ -307,7 +307,7 @@ class ICA(object):
             Number of panel-columns.
         nrow : int
             Number of panel-rows.
-        show : boolean
+        show : bool
             If True, plot will be shown, else just the figure is returned.
 
         Returns
@@ -349,7 +349,7 @@ class ICA(object):
             Number of panel-columns.
         nrow : int
             Number of panel-rows.
-        show : boolean
+        show : bool
             If True, plot will be shown, else just the figure is returned.
 
         Returns
@@ -506,7 +506,7 @@ class ICA(object):
                 raise ValueError('Sources have to match the number'
                                  ' of components')
 
-        if self.last_fit is 'unfitted':
+        if self.last_fit == 'unfitted':
             raise RuntimeError('No fit available. Please first fit ICA '
                                'decomposition.')
 
@@ -537,7 +537,7 @@ class ICA(object):
             The first time index to include.
         stop : int | None
             The first time index to exclude.
-        copy: boolean
+        copy: bool
             modify raw instance in place or return modified copy.
 
         Returns
@@ -582,7 +582,7 @@ class ICA(object):
             The source indices to use. If None all are used.
         exclude : list-like | None
             The source indices to remove. If None  all are used.
-        copy : boolean
+        copy : bool
             Modify Epochs instance in place or return modified copy.
 
         Returns
@@ -751,7 +751,7 @@ def _get_target_ch(container, target):
     """Helper Function"""
     # auto target selection
     pick = None
-    if target is 'ecg':
+    if target == 'ecg':
         pick = pick_types(container.info, meg=False, eeg=False, stim=False,
                           eog=False, ecg=True, emg=False)
         if len(pick) == 0:
@@ -770,7 +770,7 @@ def _find_sources(sources, target, score_func):
     if isinstance(score_func, str):
         score_func = score_funcs.get(score_func, score_func)
     if not callable(score_func):
-        raise ValueError('%s is not a valid score_func.')
+        raise ValueError('%s is not a valid score_func.' % score_func)
 
     scores = score_func(sources, target)
 
