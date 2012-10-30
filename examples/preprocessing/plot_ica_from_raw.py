@@ -44,6 +44,8 @@ start, stop = raw.time_as_index([100, 160])
 
 # decompose sources for raw data
 ica.decompose_raw(raw, start=start, stop=stop, picks=picks)
+print ica
+
 sources = ica.get_sources_raw(raw, start=start, stop=stop)
 
 # setup reasonable time window for inspection
@@ -85,6 +87,22 @@ pl.plot(times, sources[ecg_source_idx])
 pl.title('ICA source matching ECG')
 pl.show()
 
+# let us have a look which other components resemble the ECG.
+# We can do this by reordering the plot by our scores using sort_args
+# and generating sort indices for the sources:
+
+ecg_sort_args = np.abs(ecg_scores.argsort())
+
+ica.plot_sources_raw(raw, sort_args=ecg_sort_args, start=start_plot,
+                     stop=stop_plot)
+
+# Let's make our ECG component selection more liberal and include sources
+# for which the variance explantion in terms of \{r^2}\ exceeds 5 percent.
+# For convenience, we can use the ica.index attribute to get the indices.
+# (the indices depend on the number of components.)
+
+ecg_source_idx_updated = ica.index[np.abs(ecg_scores) ** 2 > .05]
+
 ###############################################################################
 # Automatically find the EOG component using correlatio with EOG signal
 
@@ -106,7 +124,7 @@ pl.show()
 ###############################################################################
 # Show MEG data before and after ICA cleaning
 
-# join the detected source indices
+# join the detected artifact indices
 exclude = np.r_[ecg_source_idx, eog_source_idx]
 
 raw_ica = ica.pick_sources_raw(raw, include=None, exclude=exclude, copy=True)
