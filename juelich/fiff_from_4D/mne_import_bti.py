@@ -39,94 +39,93 @@ BTI4D.HDR_CH_GROUPS = 'CHANNEL GROUPS'
 BTI4D.HDR_CH_TRANS = 'CHANNEL XFM'
 
 
-class BtiParser(object):
-    """BTI Magnes 3600 ascii header parser
+def read_bti_ascii(bti_hdr_fname):
+    """Bti ascii export parser
+
+    Parameters
+    ----------
+    bti_hdr_fname : str
+        Absolute path to the bti ascii header.
+
+    Returns
+    -------
+    info : dict
+        bti data info as Python dictionary
+
     """
-    def __init__(self, bti_info):
+    f = open(bti_hdr_fname, "r").read()
+    info = [l for l in f.split("\n") if not l.startswith("#")]
+    _raw_parsed = {}
+    current_key = None
+    for line in info:
+        if line.isupper() and line.endswith(":"):
+            current_key = line.strip(":")
+            _raw_parsed[current_key] = []
+        else:
+            _raw_parsed[current_key].append(line)
 
-        self.bti_info = bti_info
-        self._parse()
-
-    def _parse(self):
-        f = open(self.bti_info, "r").read()
-        info = [l for l in f.split("\n") if not l.startswith("#")]
-        self._raw_parsed = {}
-        current_key = None
-        for line in info:
-            if line.isupper() and line.endswith(":"):
-                current_key = line.strip(":")
-                self._raw_parsed[current_key] = []
+    info = {}
+    for field, params in _raw_parsed.items():
+        if field in [BTI4D.HDR_FILEINFO, BTI4D.HDR_CH_NAMES,
+                     BTI4D.HDR_DATAFILE]:
+            if field == BTI4D.HDR_DATAFILE:
+                sep = " : "
+            elif field == BTI4D.HDR_FILEINFO:
+                sep = ":"
             else:
-                self._raw_parsed[current_key].append(line)
+                sep = None
+            mapping = [i.strip().split(sep) for i in params]
+            mapping = [(k.strip(), v.strip()) for k, v in mapping]
 
-        info = {}
-        for field, params in self._raw_parsed.items():
-            if field in [BTI4D.HDR_FILEINFO, BTI4D.HDR_CH_NAMES,
-                         BTI4D.HDR_DATAFILE]:
-                if field == BTI4D.HDR_DATAFILE:
-                    sep = " : "
-                elif field == BTI4D.HDR_FILEINFO:
-                    sep = ":"
-                else:
-                    sep = None
-                mapping = [i.strip().split(sep) for i in params]
-                mapping = [(k.strip(), v.strip()) for k, v in mapping]
+            if field == BTI4D.HDR_CH_NAMES:
+                info[field] = mapping
+            else:
+                info[field] = dict(mapping)
 
-                if field == BTI4D.HDR_CH_NAMES:
-                    info[field] = mapping
-                else:
-                    info[field] = dict(mapping)
+        if field == BTI4D.HDR_CH_GROUPS:
+            ch_groups = {}
+            for p in params:
+                if p.endswith("channels"):
+                    ch_groups['CHANNELS'] = int(p.strip().split(' ')[0])
+                elif "MEG" in p:
+                    ch_groups['MEG'] = int(p.strip().split(' ')[0])
+                elif "REFERENCE" in p:
+                    ch_groups['REF'] = int(p.strip().split(' ')[0])
+                elif "EEG" in p:
+                    ch_groups['EEG'] = int(p.strip().split(' ')[0])
+                elif "TRIGGER" in p:
+                    ch_groups['TRIGGER'] = int(p.strip().split(' ')[0])
+                elif "UTILITY" in p:
+                    ch_groups['UTILITY'] = int(p.strip().split(' ')[0])
+            info[BTI4D.HDR_CH_GROUPS] = ch_groups
+        elif field == BTI4D.HDR_CH_CAL:
+            ch_cal = []
+            ch_fields = ["ch_name", "group", "cal", "unit"]
+            for p in params:
+                this_ch_info = p.strip().split()
+                ch_cal.append(dict(zip(ch_fields, this_ch_info)))
+            info[BTI4D.HDR_CH_CAL] = ch_cal
 
-            if field == BTI4D.HDR_CH_GROUPS:
-                ch_groups = {}
-                for p in params:
-                    if p.endswith("channels"):
-                        ch_groups['CHANNELS'] = int(p.strip().split(' ')[0])
-                    elif "MEG" in p:
-                        ch_groups['MEG'] = int(p.strip().split(' ')[0])
-                    elif "REFERENCE" in p:
-                        ch_groups['REF'] = int(p.strip().split(' ')[0])
-                    elif "EEG" in p:
-                        ch_groups['EEG'] = int(p.strip().split(' ')[0])
-                    elif "TRIGGER" in p:
-                        ch_groups['TRIGGER'] = int(p.strip().split(' ')[0])
-                    elif "UTILITY" in p:
-                        ch_groups['UTILITY'] = int(p.strip().split(' ')[0])
-                info[BTI4D.HDR_CH_GROUPS] = ch_groups
-            elif field == BTI4D.HDR_CH_CAL:
-                ch_cal = []
-                ch_fields = ["ch_name", "group", "cal", "unit"]
-                for p in params:
-                    this_ch_info = p.strip().split()
-                    ch_cal.append(dict(zip(ch_fields, this_ch_info)))
-                info[BTI4D.HDR_CH_CAL] = ch_cal
+    for field, params in _raw_parsed.items():
+        if field == BTI4D.HDR_CH_TRANS:
+            sensor_trans = {}
+            idx = 0
+            for p in params:
+                if "|" in p:
+                    k, d, _ = p.strip().split("|")
+                    if k.strip().isalnum():
+                        current_chan = info[BTI4D.HDR_CH_NAMES][idx][0]
+                        sensor_trans[current_chan] = d.strip()
+                        idx += 1
+                    else:
+                        sensor_trans[current_chan] += ", " + d.strip()
+        info[BTI4D.HDR_CH_TRANS] = sensor_trans
 
-        for field, params in self._raw_parsed.items():
-            if field == BTI4D.HDR_CH_TRANS:
-                sensor_trans = {}
-                idx = 0
-                for p in params:
-                    if "|" in p:
-                        k, d, _ = p.strip().split("|")
-                        if k.strip().isalnum():
-                            current_chan = info[BTI4D.HDR_CH_NAMES][idx][0]
-                            sensor_trans[current_chan] = d.strip()
-                            idx += 1
-                        else:
-                            sensor_trans[current_chan] += ", " + d.strip()
-            info[BTI4D.HDR_CH_TRANS] = sensor_trans
+    tsl, duration = _raw_parsed['LONGEST EPOCH'][0].split(', ')
+    info['FILEINFO']['Time slices'] = tsl.split(': ')[1]
+    info['FILEINFO']['Total duration'] = duration.strip()
 
-        self.info = info
-        self.info = info
-        tsl, duration = self._raw_parsed['LONGEST EPOCH'][0].split(', ')
-        self['FILEINFO']['Time slices'] = tsl.split(': ')[1]
-        self['FILEINFO']['Total duration'] = duration.strip()
-
-    def __getitem__(self, item):
-        return self.info.__getitem__(item)
-
-    def __setitem__(self, *args):
-        return self.info.__setitem__(*args)
+    return info
 
 
 class RawFrom4D(Raw):
@@ -154,7 +153,7 @@ class RawFrom4D(Raw):
         """ Alternative fiff file constructor
         """
         # intitalize configparser for Juelich-4D header file
-        self.hdr = BtiParser(hdr_fname)
+        self.hdr = read_bti_ascii(hdr_fname)
         self._root, self._hdr_name = op.split(hdr_fname)
         self._data_file = data_fname
         self.head_shape_fname = head_shape_fname
