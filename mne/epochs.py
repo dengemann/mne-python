@@ -9,6 +9,10 @@ import copy as cp
 import warnings
 
 import numpy as np
+from copy import deepcopy
+
+import logging
+logger = logging.getLogger('mne')
 
 import fiff
 from .fiff import Evoked, FIFF
@@ -17,6 +21,7 @@ from .fiff.proj import setup_proj
 from .baseline import rescale
 from .utils import check_random_state
 from .filter import resample
+from . import verbose
 
 
 class Epochs(object):
@@ -78,9 +83,9 @@ class Epochs(object):
     proj : bool, optional
         Apply SSP projection vectors
 
-    verbose : None | bool
-        Use verbose output. None defaults to raw.verbose.
-
+    verbose : bool, str, int, or None
+        If not None, override default verbose level (see mne.verbose).
+        Defaults to raw.verbose.
 
     Attributes
     ----------
@@ -94,6 +99,9 @@ class Epochs(object):
         This list (same length as events) contains the channel(s),
         if any, that caused an event in the original event list
         to be dropped by drop_bad_epochs().
+
+    verbose : bool, str, int, or None
+        See above.
 
     Methods
     -------
@@ -125,6 +133,7 @@ class Epochs(object):
         Return Epochs object with a subset of epochs (supports single
         index and python style slicing)
     """
+    @verbose
     def __init__(self, raw, events, event_id, tmin, tmax, baseline=(None, 0),
                 picks=None, name='Unknown', keep_comp=False, dest_comp=0,
                 preload=False, reject=None, flat=None, proj=True,
@@ -167,7 +176,7 @@ class Epochs(object):
         #   Set up the CTF compensator
         current_comp = fiff.get_current_comp(self.info)
         if current_comp > 0:
-            print 'Current compensation grade : %d' % current_comp
+            logger.info('Current compensation grade : %d' % current_comp)
 
         if keep_comp:
             dest_comp = current_comp
@@ -175,8 +184,8 @@ class Epochs(object):
         if current_comp != dest_comp:
             raw['comp'] = fiff.raw.make_compensator(raw.info, current_comp,
                                                  dest_comp)
-            print 'Appropriate compensator added to change to grade %d.' % (
-                                                                    dest_comp)
+            logger.info('Appropriate compensator added to change to '
+                        'grade %d.' % (dest_comp))
 
         #    Select the desired events
         self.events = events
@@ -188,7 +197,7 @@ class Epochs(object):
         n_events = len(self.events)
 
         if n_events > 0:
-            print '%d matching events found' % n_events
+            logger.info('%d matching events found' % n_events)
         else:
             raise ValueError('No desired events found.')
 
@@ -232,14 +241,15 @@ class Epochs(object):
 
         Should be used before slicing operations.
 
-        .. Warning:: Operation is slow since all epochs have to be read from disk.
-            To avoid reading epochs form disk multiple times, initialize
+        .. Warning:: Operation is slow since all epochs have to be read from
+            disk. To avoid reading epochs form disk multiple times, initialize
             Epochs object with preload=True.
 
         """
         self._get_data_from_disk(out=False)
 
-    def _get_epoch_from_disk(self, idx):
+    @verbose
+    def _get_epoch_from_disk(self, idx, verbose=None):
         """Load one epoch from disk"""
         sfreq = self.raw.info['sfreq']
 
@@ -258,15 +268,15 @@ class Epochs(object):
         epoch, _ = self.raw[self.picks, start:stop]
 
         if self.proj and self._projector is not None:
-            print "SSP projectors applied..."
+            logger.info("SSP projectors applied...")
             epoch = np.dot(self._projector, epoch)
 
         # Run baseline correction
-        epoch = rescale(epoch, self.times, self.baseline, 'mean',
-                        verbose=self.verbose, copy=False)
+        epoch = rescale(epoch, self.times, self.baseline, 'mean', copy=False)
         return epoch
 
-    def _get_data_from_disk(self, out=True):
+    @verbose
+    def _get_data_from_disk(self, out=True, verbose=None):
         """Load all data from disk
 
         Parameters
@@ -274,7 +284,9 @@ class Epochs(object):
         out : bool
             Return the data. Setting this to False is used to reject bad
             epochs without caching all the data, which saves memory.
-
+        verbose : bool, str, int, or None
+            If not None, override default verbose level (see mne.verbose).
+            Defaults to self.verbose.
         """
         if self._bad_dropped:
             if not out:
@@ -299,14 +311,16 @@ class Epochs(object):
             self.drop_log = drop_log
             self.events = np.atleast_2d(self.events[good_events])
             self._bad_dropped = True
-            print "%d bad epochs dropped" % (n_events - len(good_events))
+            logger.info("%d bad epochs dropped"
+                        % (n_events - len(good_events)))
             if not out:
                 return
 
         data = np.array(epochs)
         return data
 
-    def _is_good_epoch(self, data):
+    @verbose
+    def _is_good_epoch(self, data, verbose=None):
         """Determine if epoch is good"""
         if data is None:
             return False, ['NO_DATA']
@@ -565,6 +579,14 @@ class Epochs(object):
         else:
             raise RuntimeError('Can only resample preloaded data')
 
+    def copy(self):
+        """ Return copy of Epochs instance
+        """
+        raw = self.raw.copy()
+        new = deepcopy(self)
+        new.raw = raw
+        return new
+
     def as_data_frame(self, frame=True):
         """Get the epochs as Pandas panel of data frames
 
@@ -594,8 +616,62 @@ class Epochs(object):
 
         return out
 
+    def to_nitime(self, picks=None, epochs_idx=None, collapse=False,
+                  copy=True, use_first_samp=False):
+        """ Export epochs as nitime TimeSeries
 
-def _is_good(e, ch_names, channel_type_idx, reject, flat, full_report=False):
+        Parameters
+        ----------
+        picks : array-like | None
+            Indices for exporting subsets of the epochs channels. If None
+            all good channels will be used.
+        epochs_idx : slice | array-like | None
+            Epochs index for single or selective epochs exports. If None, all
+            epochs will be used.
+        collapse : boolean
+            If True export epochs and time slices will be collapsed to 2D array.
+            This may be required by some nitime functions.
+        copy : boolean
+            If True exports copy of epochs data.
+        use_first_samp: boolean
+            If True, the time returned is relative to the session onset, else
+            relative to the recording onset.
+
+        Returns
+        -------
+        epochs_ts : instance of nitime.TimeSeries
+            The Epochs as nitime TimeSeries object
+        """
+        try:
+            from nitime import TimeSeries  # to avoid strong dependency
+        except ImportError:
+            raise Exception('the nitime package is missing')
+
+        if picks is None:
+            picks = pick_types(self.info, include=self.ch_names,
+                               exclude=self.info['bads'])
+        if epochs_idx is None:
+            epochs_idx = slice(len(self.events))
+
+        data = self.get_data()[epochs_idx, picks]
+
+        if copy is True:
+            data = data.copy()
+
+        if collapse is True:
+            data = np.hstack(data).copy()
+
+        offset = self.raw.time_as_index(abs(self.tmin), use_first_samp)
+        t0 = self.raw.index_as_time(self.events[0, 0] - offset)[0]
+        epochs_ts = TimeSeries(data, sampling_rate=self.info['sfreq'], t0=t0)
+        epochs_ts.ch_names = np.array(self.ch_names)[picks].tolist()
+
+        return epochs_ts
+
+
+@verbose
+def _is_good(e, ch_names, channel_type_idx, reject, flat, full_report=False,
+             verbose=None):
     """Test if data segment e is good according to the criteria
     defined in reject and flat. If full_report=True, it will give
     True/False as well as a list of all offending channels.
@@ -609,18 +685,18 @@ def _is_good(e, ch_names, channel_type_idx, reject, flat, full_report=False):
             if len(idx) > 0:
                 e_idx = e[idx]
                 deltas = np.max(e_idx, axis=1) - np.min(e_idx, axis=1)
-                idx_max_delta = np.argmax(deltas)
-                delta = deltas[idx_max_delta]
-                if delta > thresh:
-                    ch_name = ch_names[idx[idx_max_delta]]
-                    if not has_printed:
-                        print '    Rejecting epoch based on %s : %s (%s > %s).' \
-                                    % (name, ch_name, delta, thresh)
+                idx_deltas = np.where(deltas > thresh)[0]
+
+                if len(idx_deltas) > 0:
+                    ch_name = [ch_names[idx[i]] for i in idx_deltas]
+                    if (not has_printed):
+                        logger.info('    Rejecting epoch based on %s : %s'
+                                    % (name, ch_name))
                         has_printed = True
                     if not full_report:
                         return False
                     else:
-                        bad_list.append(ch_name)
+                        bad_list.extend(ch_name)
 
     if flat is not None:
         for key, thresh in flat.iteritems():
@@ -633,9 +709,9 @@ def _is_good(e, ch_names, channel_type_idx, reject, flat, full_report=False):
                 delta = deltas[idx_min_delta]
                 if delta < thresh:
                     ch_name = ch_names[idx[idx_min_delta]]
-                    if not has_printed:
-                        print ('    Rejecting flat epoch based on '
-                               '%s : %s (%s < %s).' % (name, ch_name, delta,
+                    if (not has_printed):
+                        logger.info('    Rejecting flat epoch based on %s : '
+                                    '%s (%s < %s).' % (name, ch_name, delta,
                                                        thresh))
                         has_printed = True
                     if not full_report:

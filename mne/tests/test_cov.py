@@ -40,34 +40,31 @@ def test_io_cov():
 
 
 def test_cov_estimation_on_raw_segment():
-    """Estimate raw on continuous recordings (typically empty room)
+    """Test estimation from raw on continuous recordings (typically empty room)
     """
     cov = compute_raw_data_covariance(raw)
     cov_mne = read_cov(erm_cov_fname)
     assert_true(cov_mne.ch_names == cov.ch_names)
-    print (linalg.norm(cov.data - cov_mne.data, ord='fro')
-            / linalg.norm(cov.data, ord='fro'))
     assert_true(linalg.norm(cov.data - cov_mne.data, ord='fro')
-            / linalg.norm(cov.data, ord='fro')) < 1e-6
+                / linalg.norm(cov.data, ord='fro') < 1e-4)
 
     # test IO when computation done in Python
     cov.save('test-cov.fif')  # test saving
     cov_read = read_cov('test-cov.fif')
     assert_true(cov_read.ch_names == cov.ch_names)
     assert_true(cov_read.nfree == cov.nfree)
-    assert_true((linalg.norm(cov.data - cov_read.data, ord='fro')
-            / linalg.norm(cov.data, ord='fro')) < 1e-5)
+    assert_array_almost_equal(cov.data, cov_read.data)
 
     # test with a subset of channels
     picks = pick_channels(raw.ch_names, include=raw.ch_names[:5])
     cov = compute_raw_data_covariance(raw, picks=picks)
     assert_true(cov_mne.ch_names[:5] == cov.ch_names)
     assert_true(linalg.norm(cov.data - cov_mne.data[picks][:, picks],
-                ord='fro') / linalg.norm(cov.data, ord='fro')) < 1e-6
+                ord='fro') / linalg.norm(cov.data, ord='fro') < 1e-4)
 
 
 def test_cov_estimation_with_triggers():
-    """Estimate raw with triggers
+    """Test estimation from raw with triggers
     """
     events = find_events(raw)
     event_ids = [1, 2, 3, 4]

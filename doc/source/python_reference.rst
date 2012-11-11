@@ -20,6 +20,9 @@ Classes reference
    mne.Epochs
    mne.Covariance
    mne.SourceEstimate
+   mne.Label
+   mne.BiHemiLabel
+   mne.artifacts.ICA
 
 Functions reference
 ===================
@@ -34,6 +37,16 @@ Functions reference
    write_cov
    compute_covariance
    compute_raw_data_covariance
+   read_events
+   write_events
+   find_events
+   merge_events
+   pick_events
+   make_fixed_length_events
+   concatenate_events
+   read_forward_solution
+   apply_forward
+   apply_forward_raw
    label_time_courses
    read_label
    label_sign_flip
@@ -44,17 +57,33 @@ Functions reference
    read_surface
    write_bem_surface
    read_source_spaces
-   save_stc_as_volume
-   morph_data
+   vertex_to_mni
    read_stc
    write_stc
    read_w
    write_w
+   read_source_estimate
+   morph_data
+   morph_data_precomputed
+   compute_morph_matrix
+   grade_to_vertices
+   spatio_temporal_src_connectivity
+   spatio_temporal_tris_connectivity
+   spatio_temporal_dist_connectivity
+   save_stc_as_volume
+   parse_config
+   read_reject_parameters
+   transform_coordinates
    read_proj
    write_proj
    compute_proj_epochs
    compute_proj_evoked
+   compute_proj_raw
    read_selection
+   read_dip
+   set_log_level
+   set_log_file
+   verbose
    fiff.pick_types
    fiff.pick_channels
    fiff.pick_types_evoked
@@ -121,8 +150,29 @@ Functions reference
    permutation_t_test
    permutation_cluster_test
    permutation_cluster_1samp_test
+   spatio_temporal_cluster_1samp_test
    fdr_correction
    bonferroni_correction
+
+.. automodule:: mne.viz
+ :no-members:
+ :no-inherited-members:
+
+.. currentmodule:: mne.viz
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   plot_evoked
+   plot_cov
+   plot_topo
+   plot_sparse_source_estimates
+   plot_ica_panel
+   plot_topo_power
+   plot_topo_phase_lock
+   plot_image_epochs
+   plot_topo_image_epochs
 
 .. automodule:: mne.artifacts
  :no-members:
@@ -136,6 +186,8 @@ Functions reference
 
    find_eog_events
    find_ecg_events
+   ica_find_eog_events
+   ica_find_ecg_events
 
 .. automodule:: mne.time_frequency
  :no-members:

@@ -1,4 +1,5 @@
 # Author: Alexandre Gramfort <gramfort@nmr.mgh.harvard.edu>
+#         Denis Engemann <d.engemann@fz-juelich.de>
 #
 # License: BSD (3-clause)
 
@@ -10,6 +11,15 @@ import copy as cp
 
 from mne import fiff, Epochs, read_events, pick_events
 from mne.epochs import bootstrap
+
+try:
+    import nitime
+except ImportError:
+    have_nitime = False
+else:
+    have_nitime = True
+nitime_test = np.testing.dec.skipif(not have_nitime, 'nitime not installed')
+
 
 raw_fname = op.join(op.dirname(__file__), '..', 'fiff', 'tests', 'data',
                      'test_raw.fif')
@@ -29,7 +39,7 @@ flat = dict(grad=1e-15, mag=1e-15)
 
 
 def test_read_epochs():
-    """Reading epochs from raw files
+    """Test reading epochs from raw files
     """
     epochs = Epochs(raw, events, event_id, tmin, tmax, picks=picks,
                         baseline=(None, 0))
@@ -59,7 +69,7 @@ def test_epochs_proj():
     epochs.average()
     data = epochs.get_data()
 
-    raw_proj = fiff.Raw(raw_fname, proj=True)
+    raw_proj = fiff.Raw(raw_fname, proj_active=True)
     epochs_no_proj = Epochs(raw_proj, events[:4], event_id, tmin, tmax,
                             picks=this_picks, baseline=(None, 0), proj=False)
     epochs_no_proj.average()
@@ -68,7 +78,8 @@ def test_epochs_proj():
 
 
 def test_evoked_arithmetic():
-    """Arithmetic of evoked data"""
+    """Test arithmetic of evoked data
+    """
     epochs1 = Epochs(raw, events[:4], event_id, tmin, tmax, picks=picks,
                         baseline=(None, 0))
     evoked1 = epochs1.average()
@@ -277,3 +288,48 @@ def test_bootstrap():
     epochs2 = bootstrap(epochs, random_state=0)
     assert_true(len(epochs2.events) == len(epochs.events))
     assert_true(epochs._data.shape == epochs2._data.shape)
+
+
+def test_epochs_copy():
+    """Test copy epochs
+    """
+    epochs = Epochs(raw, events[:5], event_id, tmin, tmax, picks=picks,
+                    baseline=(None, 0), preload=True,
+                    reject=reject, flat=flat)
+    copied = epochs.copy()
+    assert_array_equal(epochs._data, copied._data)
+
+    epochs = Epochs(raw, events[:5], event_id, tmin, tmax, picks=picks,
+                    baseline=(None, 0), preload=False,
+                    reject=reject, flat=flat)
+    copied = epochs.copy()
+    data = epochs.get_data()
+    copied_data = copied.get_data()
+    assert_array_equal(data, copied_data)
+
+
+@nitime_test
+def test_epochs_to_nitime():
+    """Test test_to_nitime
+    """
+    epochs = Epochs(raw, events[:5], event_id, tmin, tmax, picks=picks,
+                    baseline=(None, 0), preload=True,
+                    reject=reject, flat=flat)
+
+    picks2 = [0, 3]
+
+    epochs_ts = epochs.to_nitime(picks=None, epochs_idx=[0],
+                                 collapse=True, copy=True)
+    assert_true(epochs_ts.ch_names == epochs.ch_names)
+
+    epochs_ts = epochs.to_nitime(picks=picks2, epochs_idx=None,
+                                 collapse=True, copy=True)
+    assert_true(epochs_ts.ch_names == [epochs.ch_names[k] for k in picks2])
+
+    epochs_ts = epochs.to_nitime(picks=None, epochs_idx=[0],
+                                 collapse=False, copy=False)
+    assert_true(epochs_ts.ch_names == epochs.ch_names)
+
+    epochs_ts = epochs.to_nitime(picks=picks2, epochs_idx=None,
+                                 collapse=False, copy=False)
+    assert_true(epochs_ts.ch_names == [epochs.ch_names[k] for k in picks2])

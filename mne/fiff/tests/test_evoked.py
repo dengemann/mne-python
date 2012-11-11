@@ -1,11 +1,25 @@
+# Author: Alexandre Gramfort <gramfort@nmr.mgh.harvard.edu>
+#         Denis Engemann <d.engemann@fz-juelich.de>
+#
+# License: BSD (3-clause)
+
 import os.path as op
 
+import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_equal
 from nose.tools import assert_true
 
 from mne.fiff import read_evoked, write_evoked
 
 fname = op.join(op.dirname(__file__), 'data', 'test-ave.fif')
+
+try:
+    import nitime
+except ImportError:
+    have_nitime = False
+else:
+    have_nitime = True
+nitime_test = np.testing.dec.skipif(not have_nitime, 'nitime not installed')
 
 
 def test_io_evoked():
@@ -69,3 +83,16 @@ def test_io_multi_evoked():
         assert_equal(ave.aspect_kind, ave2.aspect_kind)
         assert_equal(ave.last, ave2.last)
         assert_equal(ave.first, ave2.first)
+
+
+@nitime_test
+def test_evoked_to_nitime():
+    """ Test to_nitime """
+    aves = read_evoked(fname, [0, 1, 2, 3])
+    evoked_ts = aves[0].to_nitime()
+    assert_equal(evoked_ts.data, aves[0].data)
+
+    picks2 = [1, 2]
+    aves = read_evoked(fname, [0, 1, 2, 3])
+    evoked_ts = aves[0].to_nitime(picks=picks2)
+    assert_equal(evoked_ts.data, aves[0].data[picks2])

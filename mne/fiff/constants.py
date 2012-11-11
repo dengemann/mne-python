@@ -28,10 +28,18 @@ FIFF.FIFFB_SUBJECT            = 106
 FIFF.FIFFB_ISOTRAK            = 107
 FIFF.FIFFB_HPI_MEAS           = 108
 FIFF.FIFFB_HPI_RESULT         = 109
+FIFF.FIFFB_HPI_COIL           = 110
+FIFF.FIFFB_PROJECT            = 111
+FIFF.FIFFB_CONTINUOUS_DATA    = 112
+FIFF.FIFFB_VOID               = 114
+FIFF.FIFFB_EVENTS             = 115
+FIFF.FIFFB_INDEX              = 116
 FIFF.FIFFB_DACQ_PARS          = 117
 FIFF.FIFFB_REF                = 118
 FIFF.FIFFB_SMSH_RAW_DATA      = 119
 FIFF.FIFFB_SMSH_ASPECT        = 120
+FIFF.FIFFB_HPI_SUBSYSTEM      = 121
+
 FIFF.FIFFB_PROJ               = 313
 FIFF.FIFFB_PROJ_ITEM          = 314
 FIFF.FIFFB_MRI                = 200
@@ -252,6 +260,9 @@ FIFF.FIFF_MNE_SOURCE_SPACE_NTRI          = 3590  # Number of triangles
 FIFF.FIFF_MNE_SOURCE_SPACE_TRIANGLES     = 3591  # The triangulation
 FIFF.FIFF_MNE_SOURCE_SPACE_NUSE_TRI      = 3592  # Number of triangles corresponding to the number of vertices in use
 FIFF.FIFF_MNE_SOURCE_SPACE_USE_TRIANGLES = 3593  # The triangulation of the used vertices in the source space
+
+FIFF.FIFF_MNE_SOURCE_SPACE_DIST          = 3599  # Distances between vertices in use (along the surface)
+FIFF.FIFF_MNE_SOURCE_SPACE_DIST_LIMIT    = 3600  # If distance is above this limit (in the volume) it has not been calculated
 #
 # 3520... Forward solution
 #
@@ -479,7 +490,7 @@ FIFF.FIFFV_POINT_RPA      = 3
 # Coil types
 #
 FIFF.FIFFV_COIL_NONE                  = 0  # The location info contains no data
-FIFF.FIFFV_COIL_EEG                   = 1  # EEG electrode position in r0 
+FIFF.FIFFV_COIL_EEG                   = 1  # EEG electrode position in r0
 FIFF.FIFFV_COIL_NM_122                = 2  # Neuromag 122 coils
 FIFF.FIFFV_COIL_NM_24                 = 3  # Old 24 channel system in HUT
 FIFF.FIFFV_COIL_NM_MCG_AXIAL          = 4  # The axial devices in the HUCS MCG system
@@ -503,5 +514,5 @@ FIFF.FIFFV_COIL_VV_MAG_T2          = 3023  # Vectorview SQ20483-A magnetometer
 FIFF.FIFFV_COIL_VV_MAG_T3          = 3024  # Vectorview SQ20950N magnetometer
 
 FIFF.FIFFV_COIL_MAGNES_MAG         = 4001  # Magnes WH magnetometer
-FIFF.FIFFV_COIL_MAGNES_GRAD        = 4002  # Magnes WH gradiometer 
+FIFF.FIFFV_COIL_MAGNES_GRAD        = 4002  # Magnes WH gradiometer
 FIFF.FIFFV_COIL_CTF_GRAD           = 5001  # CTF axial gradiometer
