@@ -8,9 +8,15 @@
 from math import floor, ceil
 import copy
 import warnings
+import os
+import os.path as op
 
 import numpy as np
 from scipy.signal import hilbert
+from copy import deepcopy
+
+import logging
+logger = logging.getLogger('mne')
 
 from .constants import FIFF
 from .open import fiff_open
@@ -18,10 +24,12 @@ from .meas_info import read_meas_info, write_meas_info
 from .tree import dir_tree_find
 from .tag import read_tag
 from .pick import pick_types
+from .proj import setup_proj, activate_proj, deactivate_proj, proj_equal
 
 from ..filter import low_pass_filter, high_pass_filter, band_pass_filter
 from ..parallel import parallel_func
 from ..utils import deprecated
+from .. import verbose
 
 
 class Raw(object):
@@ -29,37 +37,97 @@ class Raw(object):
 
     Parameters
     ----------
-    fname: string
-        The name of the raw file
-
-    allow_maxshield: bool, (default False)
-        allow_maxshield if True XXX ???
-
-    preload: bool or str (default False)
+    fnames: list, or string
+        A list of the raw files to treat as a Raw instance, or a single
+        raw file.
+    allow_maxshield : bool, (default False)
+        allow_maxshield if True, allow loading of data that has been
+        processed with Maxshield. Maxshield-processed data should generally
+        not be loaded directly, but should be processed using SSS first.
+    preload : bool or str (default False)
         Preload data into memory for data manipulation and faster indexing.
         If True, the data will be preloaded into memory (fast, requires
         large amount of memory). If preload is a string, preload is the
         file name of a memory-mapped file which is used to store the data
         on the hard drive (slower, requires less memory).
-
-    verbose: bool
-        Use verbose output
+    verbose : bool, str, int, or None
+        If not None, override default verbose level (see mne.verbose).
+    proj_active : bool
+        Apply the signal space projection (SSP) operators present in
+        the file to the data. Note: Once the projectors have been
+        applied, they can no longer be removed. It is usually not
+        recommended to apply the projectors at this point as they are
+        applied automatically later on (e.g. when computing inverse
+        solutions).
 
     Attributes
     ----------
-    info: dict
-        Measurement info
-
-    ch_names: list of string
-        List of channels' names
+    info : dict
+        Measurement info.
+    ch_names : list of string
+        List of channels' names.
+    n_times : int
+        Total number of time points in the raw file.
+    verbose : bool, str, int, or None
+        See above.
     """
+    @verbose
+    def __init__(self, fnames, allow_maxshield=False, preload=False,
+                 verbose=None, proj_active=False):
 
-    def __init__(self, fname, allow_maxshield=False, preload=False,
-                 verbose=True):
-        #   Open the file
-        if verbose:
-            print 'Opening raw data file %s...' % fname
-        fid, tree, _ = fiff_open(fname)
+        if not isinstance(fnames, list):
+            fnames = [fnames]
+
+        raws = [self._read_raw_file(fname, allow_maxshield, preload)
+                for fname in fnames]
+
+        _check_raw_compatibility(raws)
+
+        # combine information from each raw file to construct self
+        self.first_samp = raws[0].first_samp  # meta first sample
+        self._first_samps = [r.first_samp for r in raws]
+        self._last_samps = [r.last_samp for r in raws]
+        self._raw_lengths = [r.last_samp - r.first_samp + 1 for r in raws]
+        self.last_samp = self.first_samp + sum(self._raw_lengths) - 1
+        self.cals = raws[0].cals
+        self.rawdirs = [r.rawdir for r in raws]
+        self.comp = None
+        self.fids = [r.fid for r in raws]
+        self.info = copy.deepcopy(raws[0].info)
+        self.verbose = verbose
+        self.info['filenames'] = fnames
+
+        if preload:
+            self._preload_data(preload)
+        else:
+            self._preloaded = False
+
+        # setup the SSP projector
+        self._projector = None
+        if proj_active:
+            self.apply_projector()
+
+    def _preload_data(self, preload):
+        """This function actually preloads the data"""
+        if isinstance(preload, basestring):
+            # we will use a memmap: preload is a filename
+            data_buffer = preload
+        else:
+            data_buffer = None
+
+        self._data, self._times = read_raw_segment(self,
+                                                   data_buffer=data_buffer)
+        self._preloaded = True
+
+    @verbose
+    def _read_raw_file(self, fname, allow_maxshield, preload, verbose=None):
+        """Read in header information from a raw file"""
+        logger.info('Opening raw data file %s...' % fname)
+
+        #   Read in the whole file if preload is on and .fif.gz (saves time)
+        ext = os.path.splitext(fname)[1].lower()
+        whole_file = preload if '.gz' in ext else False
+        fid, tree, _ = fiff_open(fname, preload=whole_file)
 
         #   Read the measurement info
         info, meas = read_meas_info(fid, tree)
@@ -103,7 +171,14 @@ class Raw(object):
             first_skip = int(tag.data)
             first += 1
 
-        self.first_samp = first_samp
+        #  Get first sample tag if it is there
+        if directory[first].kind == FIFF.FIFF_FIRST_SAMPLE:
+            tag = read_tag(fid, directory[first].pos)
+            first_samp += int(tag.data)
+            first += 1
+
+        raw = _RawShell()
+        raw.first_samp = first_samp
 
         #   Go through the remaining tags in the directory
         rawdir = list()
@@ -133,13 +208,11 @@ class Raw(object):
                 #  Do we have an initial skip pending?
                 if first_skip > 0:
                     first_samp += nsamp * first_skip
-                    self.first_samp = first_samp
+                    raw.first_samp = first_samp
                     first_skip = 0
 
                 #  Do we have a skip pending?
                 if nskip > 0:
-                    import pdb
-                    pdb.set_trace()
                     rawdir.append(dict(ent=None, first=first_samp,
                                        last=first_samp + nskip * nsamp - 1,
                                        nsamp=nskip * nsamp))
@@ -152,7 +225,7 @@ class Raw(object):
                                    nsamp=nsamp))
                 first_samp += nsamp
 
-        self.last_samp = first_samp - 1
+        raw.last_samp = first_samp - 1
 
         #   Add the calibration factors
         cals = np.zeros(info['nchan'])
@@ -160,36 +233,22 @@ class Raw(object):
             cals[k] = info['chs'][k]['range'] * \
                       info['chs'][k]['cal']
 
-        self.cals = cals
-        self.rawdir = rawdir
-        self.proj = None
-        self.comp = None
-        if verbose:
-            print '    Range : %d ... %d =  %9.3f ... %9.3f secs' % (
-                       self.first_samp, self.last_samp,
-                       float(self.first_samp) / info['sfreq'],
-                       float(self.last_samp) / info['sfreq'])
-            print 'Ready.'
+        raw.cals = cals
+        raw.rawdir = rawdir
+        raw.comp = None
+        # XXX raw.comp never changes!
+        logger.info('    Range : %d ... %d =  %9.3f ... %9.3f secs' % (
+                    raw.first_samp, raw.last_samp,
+                    float(raw.first_samp) / info['sfreq'],
+                    float(raw.last_samp) / info['sfreq']))
 
-        self.fid = fid
-        self.info = info
-        self.verbose = verbose
+        raw.fid = fid
+        raw.info = info
+        raw.verbose = verbose
 
-        if preload:
-            nchan = self.info['nchan']
-            nsamp = self.last_samp - self.first_samp + 1
-            if isinstance(preload, str):
-                # preload data using a memmap file
-                self._data = np.memmap(preload, mode='w+', dtype='float32',
-                                       shape=(nchan, nsamp))
-            else:
-                self._data = np.empty((nchan, nsamp), dtype='float32')
+        logger.info('Ready.')
 
-            self._data, self._times = read_raw_segment(self,
-                                                       data_buffer=self._data)
-            self._preloaded = True
-        else:
-            self._preloaded = False
+        return raw
 
     def _parse_get_set_params(self, item):
         # make sure item is a tuple
@@ -200,7 +259,6 @@ class Raw(object):
             raise RuntimeError("Unable to access raw data (need both channels "
                                "and time)")
 
-        time_slice = item[1]
         if isinstance(item[0], slice):
             start = item[0].start if item[0].start is not None else 0
             nchan = self.info['nchan']
@@ -210,11 +268,18 @@ class Raw(object):
         else:
             sel = item[0]
 
-        start, stop, step = time_slice.start, time_slice.stop, \
-                            time_slice.step
+        if isinstance(item[1], slice):
+            time_slice = item[1]
+            start, stop, step = time_slice.start, time_slice.stop, \
+                                time_slice.step
+        elif isinstance(item[1], int):
+            start, stop, step = item[1], item[1] + 1, 1
+        else:
+            raise ValueError('Must pass int or slice to __getitem__')
+
         if start is None:
             start = 0
-        if step is not None:
+        if (step is not None) and (step is not 1):
             raise ValueError('step needs to be 1 : %d given' % step)
 
         if isinstance(sel, int):
@@ -229,10 +294,12 @@ class Raw(object):
         """getting raw data content with python slicing"""
         sel, start, stop = self._parse_get_set_params(item)
         if self._preloaded:
-            return self._data[sel, start:stop], self._times[start:stop]
+            data, times = self._data[sel, start:stop], self._times[start:stop]
         else:
-            return read_raw_segment(self, start=start, stop=stop, sel=sel,
-                                    verbose=self.verbose)
+            data, times = read_raw_segment(self, start=start, stop=stop,
+                                           sel=sel, proj=self._projector,
+                                           verbose=self.verbose)
+        return data, times
 
     def __setitem__(self, item, value):
         """setting raw data content with python slicing"""
@@ -244,7 +311,8 @@ class Raw(object):
         # set the data
         self._data[sel, start:stop] = value
 
-    def apply_function(self, fun, picks, dtype, n_jobs, verbose, *args,
+    @verbose
+    def apply_function(self, fun, picks, dtype, n_jobs, verbose=None, *args,
                        **kwargs):
         """ Apply a function to a subset of channels.
 
@@ -280,8 +348,9 @@ class Raw(object):
         n_jobs: int
             Number of jobs to run in parallel.
 
-        verbose: int
-            Verbosity level.
+        verbose : bool, str, int, or None
+            If not None, override default verbose level (see mne.verbose).
+            Defaults to self.verbose.
 
         *args:
             Additional positional arguments to pass to fun (first pos. argument
@@ -307,7 +376,7 @@ class Raw(object):
                 self._data[idx, :] = fun(data_in[idx, :], *args, **kwargs)
         else:
             # use parallel function
-            parallel, p_fun, _ = parallel_func(fun, n_jobs, verbose)
+            parallel, p_fun, _ = parallel_func(fun, n_jobs)
 
             data_picks = data_in[picks, :]
             data_picks_new = np.array(parallel(p_fun(x, *args, **kwargs)
@@ -315,7 +384,8 @@ class Raw(object):
 
             self._data[picks, :] = data_picks_new
 
-    def apply_hilbert(self, picks, envelope=False, n_jobs=1, verbose=5):
+    @verbose
+    def apply_hilbert(self, picks, envelope=False, n_jobs=1, verbose=None):
         """ Compute analytic signal or envelope for a subset of channels.
 
         If envelope=False, the analytic signal for the channels defined in
@@ -343,15 +413,13 @@ class Raw(object):
         ----------
         picks : list of int
             Indices of channels to apply the function to.
-
         envelope : bool (default: False)
             Compute the envelope signal of each channel.
-
         n_jobs: int
             Number of jobs to run in parallel.
-
-        verbose: int
-            Verbosity level.
+        verbose : bool, str, int, or None
+            If not None, override default verbose level (see mne.verbose).
+            Defaults to self.verbose.
 
         Notes
         -----
@@ -368,13 +436,14 @@ class Raw(object):
         inverse, and computing the envelope in source space.
         """
         if envelope:
-            self.apply_function(_envelope, picks, None, n_jobs, verbose)
+            self.apply_function(_envelope, picks, None, n_jobs)
         else:
-            self.apply_function(hilbert, picks, np.complex64, n_jobs, verbose)
+            self.apply_function(hilbert, picks, np.complex64, n_jobs)
 
+    @verbose
     def filter(self, l_freq, h_freq, picks=None, filter_length=None,
                l_trans_bandwidth=0.5, h_trans_bandwidth=0.5, n_jobs=1,
-               verbose=5):
+               verbose=None):
         """Filter a subset of channels.
 
         Applies a zero-phase band-pass filter to the channels selected by
@@ -389,15 +458,12 @@ class Raw(object):
         ----------
         l_freq : float | None
             Low cut-off frequency in Hz. If None the data are only low-passed.
-
         h_freq : float
             High cut-off frequency in Hz. If None the data are only
             high-passed.
-
         picks : list of int | None
             Indices of channels to filter. If None only the data (MEG/EEG)
             channels will be filtered.
-
         filter_length : int (default: None)
             Length of the filter to use (e.g. 4096).
             If None or "n_times < filter_length",
@@ -408,11 +474,14 @@ class Raw(object):
             Width of the transition band at the low cut-off frequency in Hz.
         h_trans_bandwidth : float
             Width of the transition band at the high cut-off frequency in Hz.
-        n_jobs: int (default: 1)
+        n_jobs: int
             Number of jobs to run in parallel.
-        verbose: int (default: 5)
-            Verbosity level.
+        verbose : bool, str, int, or None
+            If not None, override default verbose level (see mne.verbose).
+            Defaults to self.verbose.
         """
+        if verbose is None:
+            verbose = self.verbose
         fs = float(self.info['sfreq'])
         if l_freq == 0:
             l_freq = None
@@ -435,9 +504,24 @@ class Raw(object):
                                 l_trans_bandwidth=l_trans_bandwidth,
                                 h_trans_bandwidth=h_trans_bandwidth)
 
+    def apply_projector(self):
+        """Apply the signal space projection (SSP) operators to the data.
+
+        Note: Once the projectors have been applied, they can no longer be
+              removed. It is usually not recommended to apply the projectors at
+              this point, as they are applied automatically later on (e.g. when
+              computing inverse solutions).
+       """
+        self._projector, self.info = setup_proj(self.info,
+                                                verbose=self.verbose)
+        activate_proj(self.info['projs'], copy=False, verbose=self.verbose)
+
+        if self._preloaded:
+            self._data = np.dot(self._projector, self._data)
+
     @deprecated('band_pass_filter is deprecated please use raw.filter instead')
     def band_pass_filter(self, picks, l_freq, h_freq, filter_length=None,
-                         n_jobs=1, verbose=5):
+                         n_jobs=1, verbose=None):
         """Band-pass filter a subset of channels.
 
         Applies a zero-phase band-pass filter to the channels selected by
@@ -452,31 +536,28 @@ class Raw(object):
         ----------
         picks : list of int
             Indices of channels to filter.
-
         l_freq : float
             Low cut-off frequency in Hz.
-
         h_freq : float
             High cut-off frequency in Hz.
-
         filter_length : int (default: None)
             Length of the filter to use. If None or "n_times < filter_length",
             (n_times: number of timepoints in Raw object) the filter length
             used is n_times. Otherwise, overlap-add filtering with a
             filter of the specified length is used (faster for long signals).
-
         n_jobs: int (default: 1)
             Number of jobs to run in parallel.
-
-        verbose: int (default: 5)
-            Verbosity level.
+        verbose : bool, str, int, or None
+            If not None, override default verbose level (see mne.verbose).
+            Defaults to self.verbose.
         """
+        verbose = self.verbose if verbose is None else verbose
         self.filter(l_freq, h_freq, picks, n_jobs=n_jobs, verbose=verbose,
                     filter_length=filter_length)
 
     @deprecated('high_pass_filter is deprecated please use raw.filter instead')
     def high_pass_filter(self, picks, freq, filter_length=None, n_jobs=1,
-                         verbose=5):
+                         verbose=None):
         """High-pass filter a subset of channels.
 
         Applies a zero-phase high-pass filter to the channels selected by
@@ -491,28 +572,25 @@ class Raw(object):
         ----------
         picks : list of int
             Indices of channels to filter.
-
         freq : float
             Cut-off frequency in Hz.
-
         filter_length : int (default: None)
             Length of the filter to use. If None or "n_times < filter_length",
             (n_times: number of timepoints in Raw object) the filter length
             used is n_times. Otherwise, overlap-add filtering with a
             filter of the specified length is used (faster for long signals).
-
         n_jobs: int (default: 1)
             Number of jobs to run in parallel.
-
         verbose: int (default: 5)
             Verbosity level.
         """
+        verbose = self.verbose if verbose is None else verbose
         self.filter(freq, None, picks, n_jobs=n_jobs, verbose=verbose,
                     filter_length=filter_length)
 
     @deprecated('low_pass_filter is deprecated please use raw.filter instead')
     def low_pass_filter(self, picks, freq, filter_length=None, n_jobs=1,
-                        verbose=5):
+                        verbose=None):
         """Low-pass filter a subset of channels.
 
         Applies a zero-phase low-pass filter to the channels selected by
@@ -527,22 +605,19 @@ class Raw(object):
         ----------
         picks : list of int
             Indices of channels to filter.
-
         freq : float
             Cut-off frequency in Hz.
-
         filter_length : int (default: None)
             Length of the filter to use. If None or "n_times < filter_length",
             (n_times: number of timepoints in Raw object) the filter length
             used is n_times. Otherwise, overlap-add filtering with a
             filter of the specified length is used (faster for long signals).
-
         n_jobs: int (default: 1)
             Number of jobs to run in parallel.
-
         verbose: int (default: 5)
             Verbosity level.
         """
+        verbose = self.verbose if verbose is None else verbose
         self.filter(None, freq, picks, n_jobs=n_jobs, verbose=verbose,
                     filter_length=filter_length)
 
@@ -552,54 +627,89 @@ class Raw(object):
         Parameters
         ----------
         projs : list
-            List with projection vectors
-
+            List with projection vectors.
         remove_existing : bool
-            Remove the projection vectors currently in the file
+            Remove the projection vectors currently in the file.
         """
-        projs = copy.deepcopy(projs)
+
+        # mark proj as inactive, as they have not been applied
+        projs = deactivate_proj(projs, copy=True, verbose=self.verbose)
 
         if remove_existing:
+            # we cannot remove the proj if they are active
+            if any(p['active'] for p in self.info['projs']):
+                raise ValueError('Cannot remove projectors that have '
+                                 'already been applied')
             self.info['projs'] = projs
         else:
             self.info['projs'].extend(projs)
 
+    def del_proj(self, idx):
+        """Remove SSP projection vector
+
+        Note: The projection vector can only be removed if it is inactive
+              (has not been applied to the data).
+
+        Parameters:
+        -----------
+        idx : int
+            Index of the projector to remove.
+        """
+        if self.info['projs'][idx]['active']:
+            raise ValueError('Cannot remove projectors that have already '
+                             'been applied')
+
+        self.info['projs'].pop(idx)
+
+    @verbose
     def save(self, fname, picks=None, tmin=0, tmax=None, buffer_size_sec=10,
-             drop_small_buffer=False):
+             drop_small_buffer=False, proj_active=False, verbose=None):
         """Save raw data to file
 
         Parameters
         ----------
         fname : string
-            File name of the new dataset. Caveat! A new file name is required.
-
+            File name of the new dataset. Caveat! This has to be a new
+            filename.
         picks : list of int
-            Indices of channels to include
-
+            Indices of channels to include.
         tmin : float
-            Time in seconds of first sample to save
-
-        tmax : int
-            Time in seconds of last sample to save
-
+            Time in seconds of first sample to save.
+        tmax : float
+            Time in seconds of last sample to save.
         buffer_size_sec : float
             Size of data chuncks in seconds.
-
         drop_small_buffer: bool
             Drop or not the last buffer. It is required by maxfilter (SSS)
             that only accepts raw files with buffers of the same size.
-
+        proj_active: bool
+            If True the data is saved with the projections applied (active).
+            Note: If apply_projector() was used to apply the projectons,
+            the projectons will be active even if proj_active is False.
+        verbose : bool, str, int, or None
+            If not None, override default verbose level (see mne.verbose).
+            Defaults to self.verbose.
         """
-        if fname == self.info['filename']:
-            raise RuntimeError('Invalid operation. '
-                               'Please use an alternative file name!')
+
+        if any([f in self.info['filenames'] for f in
+            [fname, op.split(fname)[-1]]]):
+            raise ValueError('You cannot save data to the same file.'
+                               ' Please use a different filename.')
 
         if self._preloaded:
             if np.iscomplexobj(self._data):
                 warnings.warn('Saving raw file with complex data. Loading '
                               'with command-line MNE tools will not work.')
 
-        outfid, cals = start_writing_raw(fname, self.info, picks)
+        if proj_active:
+            info = copy.deepcopy(self.info)
+            proj, info = setup_proj(info)
+            activate_proj(info['projs'], copy=False)
+        else:
+            info = self.info
+            proj = None
+
+        outfid, cals = start_writing_raw(fname, info, picks)
         #
         #   Set up the reading parameters
         #
@@ -628,264 +738,491 @@ class Raw(object):
             else:
                 data, times = self[picks, first:last]
 
+            if proj is not None:
+                data = np.dot(proj, data)
+
             if (drop_small_buffer and (first > start)
                                             and (len(times) < buffer_size)):
-                print 'Skipping data chunk due to small buffer ... [done]\n'
+                logger.info('Skipping data chunk due to small buffer ... '
+                            '[done]')
                 break
-
-            print 'Writing ... ',
+            logger.info('Writing ...')
             write_raw_buffer(outfid, data, cals)
-            print '[done]'
+            logger.info('[done]')
 
         finish_writing_raw(outfid)
 
+    @deprecated('time_to_index is deprecated please use time_as_index instead')
     def time_to_index(self, *args):
+        """Convert time to indices"""
         indices = []
         for time in args:
             ind = int(time * self.info['sfreq'])
             indices.append(ind)
         return indices
 
+    def time_as_index(self, times, use_first_samp=False):
+        """Convert time to indices
+        Parameters
+        ----------
+        times : list-like | float | int
+            List of numbers or a number representing points in time.
+        use_first_samp: boolean
+            If True, time is treated as relative to the session onset, else
+            as relative to the recording onset.
+
+        Returns
+        -------
+        index : ndarray
+            Indices corresponding to the times supplied.
+        """
+        if type(times) in (int, float):
+            times = [times]
+
+        index = np.array(times) * self.info['sfreq']
+
+        if use_first_samp:
+            index += self.first_samp
+
+        return index.astype(int)
+
+    def index_as_time(self, index, use_first_samp=False):
+        """Convert time to indices
+        Parameters
+        ----------
+        index : list-like | int
+            List of ints or int representing points in time.
+        use_first_samp: boolean
+            If True, the time returned is relative to the session onset, else
+            relative to the recording onset.
+
+        Returns
+        -------
+        times : ndarray
+            Times corresponding to the index supplied.
+        """
+        if isinstance(index, int):
+            index = [index]
+
+        index = np.array(index, dtype=int) + (self.first_samp if
+                                              use_first_samp else 0)
+        times = index / self.info['sfreq']
+
+        return times
+
+    @property
+    def ch_names(self):
+        return self.info['ch_names']
+
+    @property
+    def n_times(self):
+        return self.last_samp - self.first_samp + 1
+
+    def __len__(self):
+        return self.n_times
+
+    def load_bad_channels(self, bad_file=None, force=False):
+        """
+        Mark channels as bad from a text file, in the style
+        (mostly) of the C function mne_mark_bad_channels
+
+        Parameters
+        ----------
+        bad_file : string
+            File name of the text file containing bad channels
+            If bad_file = None, bad channels are cleared, but this
+            is more easily done directly as raw.info['bads'] = [].
+
+        force : boolean
+            Whether or not to force bad channel marking (of those
+            that exist) if channels are not found, instead of
+            raising an error.
+        """
+
+        if bad_file is not None:
+            # Check to make sure bad channels are there
+            names = frozenset(self.info['ch_names'])
+            bad_names = filter(None, open(bad_file).read().splitlines())
+            names_there = [ci for ci in bad_names if ci in names]
+            count_diff = len(bad_names) - len(names_there)
+
+            if count_diff > 0:
+                if not force:
+                    raise ValueError('Bad channels from:\n%s\n not found '
+                                     'in:\n%s' % (bad_file,
+                                                  self.info['filenames'][0]))
+                else:
+                    warnings.warn('%d bad channels from:\n%s\nnot found '
+                                  'in:\n%s' % (count_diff, bad_file,
+                                               self.info['filenames'][0]))
+            self.info['bads'] = names_there
+        else:
+            self.info['bads'] = []
+
+    def append(self, raws, preload=None):
+        """Concatenate raw instances as if they were continuous
+
+        Parameters
+        ----------
+        raws : list, or Raw instance
+            list of Raw instances to concatenate to the current instance
+            (in order), or a single raw instance to concatenate.
+
+        preload : bool, str, or None (default None)
+            Preload data into memory for data manipulation and faster indexing.
+            If True, the data will be preloaded into memory (fast, requires
+            large amount of memory). If preload is a string, preload is the
+            file name of a memory-mapped file which is used to store the data
+            on the hard drive (slower, requires less memory). If preload is
+            None, preload=True or False is inferred using the preload status
+            of the raw files passed in.
+        """
+        if not isinstance(raws, list):
+            raws = [raws]
+
+        # make sure the raws are compatible
+        all_raws = [self]
+        all_raws += raws
+        _check_raw_compatibility(all_raws)
+
+        # deal with preloading data first (while files are separate)
+        all_preloaded = self._preloaded and all(r._preloaded for r in raws)
+        if preload is None:
+            if all_preloaded:
+                preload = True
+            else:
+                preload = False
+
+        if preload is False:
+            if self._preloaded:
+                self._data = None
+                self._times = None
+            self._preloaded = False
+        else:
+            # do the concatenation ourselves since preload might be a string
+            nchan = self.info['nchan']
+            c_ns = [self.last_samp - self.first_samp + 1]
+            c_ns += [r.last_samp - r.first_samp + 1 for r in raws]
+            c_ns = np.cumsum(np.array(c_ns, dtype='int'))
+            nsamp = c_ns[-1]
+
+            if not self._preloaded:
+                this_data = read_raw_segment(self)[0]
+            else:
+                this_data = self._data
+
+            # allocate the buffer
+            if isinstance(preload, basestring):
+                _data = np.memmap(preload, mode='w+', dtype=this_data.dtype,
+                                  shape=(nchan, nsamp))
+            else:
+                _data = np.empty((nchan, nsamp), dtype=this_data.dtype)
+
+            _data[:, 0:c_ns[0]] = this_data
+
+            for ri in range(len(raws)):
+                if not r._preloaded:
+                    # read the data directly into the buffer
+                    data_buffer = _data[:, c_ns[ri]:c_ns[ri + 1]]
+                    read_raw_segment(raws[ri], data_buffer=data_buffer)
+                else:
+                    _data[:, c_ns[ri]:c_ns[ri + 1]] = raws[ri]._data
+
+            self._data = _data
+            stop = self.last_samp - self.first_samp + 1
+            self._times = np.arange(0, stop) / self.info['sfreq']
+            self._preloaded = True
+
+        # now combine information from each raw file to construct new self
+        for r in raws:
+            self._first_samps += r._first_samps
+            self._last_samps += r._last_samps
+            self._raw_lengths += r._raw_lengths
+            self.rawdirs += r.rawdirs
+            self.fids += r.fids
+            self.info['filenames'] += r.info['filenames']
+        self.last_samp = self.first_samp + sum(self._raw_lengths) - 1
+
     def close(self):
-        self.fid.close()
+        [f.close() for f in self.fids]
+
+    def copy(self):
+        """ Return copy of Raw instance
+        """
+        new = deepcopy(self)
+        if self._preloaded:
+            new.fids = []
+        else:
+            new.fids = [open(fname, "rb") for fname in self.info['filenames']]
+            for new_fid, this_fid in zip(new.fids, self.fids):
+                new_fid.seek(this_fid.tell())
+
+        return new
+
+    def to_nitime(self, start=None, stop=None, use_first_samp=False, picks=None,
+                  copy=True):
+        """ Raw data as nitime TimeSeries
+
+        Parameters
+        ----------
+        start : int | None
+            Data-extraction start index. If None, data will be exported from
+            the first sample.
+        stop : int | None
+            Data-extraction stop index. If None, data will be exported to the
+            last index.
+        use_first_samp: boolean
+            If True, the time returned is relative to the session onset, else
+            relative to the recording onset.
+        picks : array-like | None
+            Indices of channels to apply. If None, all channels will be exported.
+        copy : boolean | None
+            Whether to copy the raw data or not.
+
+        Returns
+        -------
+        raw_ts : instance of nitime.TimeSeries
+        """
+        try:
+            from nitime import TimeSeries  # to avoid strong dependency
+        except ImportError:
+            raise Exception('the nitime package is missing')
+
+        data, _ = self[picks, start:stop]
+        if copy:
+            data = data.copy()
+
+        start_time = self.index_as_time(start if start else 0, use_first_samp)
+        raw_ts = TimeSeries(data, sampling_rate=self.info['sfreq'],
+                            t0=start_time)
+
+        raw_ts.ch_names = [self.ch_names[k] for k in picks]
+
+        return raw_ts
 
     def __repr__(self):
         s = "n_channels x n_times : %s x %s" % (len(self.info['ch_names']),
                                        self.last_samp - self.first_samp + 1)
         return "Raw (%s)" % s
 
-    @property
-    def ch_names(self):
-        return self.info['ch_names']
+
+class _RawShell():
+    """Used for creating a temporary raw object"""
+    def __init__(self):
+        self.first_samp = None
+        self.last_samp = None
+        self.cals = None
+        self.rawdir = None
+        self._projector = None
 
 
+@verbose
 def read_raw_segment(raw, start=0, stop=None, sel=None, data_buffer=None,
-    verbose=False):
+    verbose=None, proj=None):
     """Read a chunck of raw data
 
     Parameters
     ----------
-    raw: Raw object
-        An instance of Raw
-
-    start: int, (optional)
+    raw : Raw object
+        An instance of Raw.
+    start : int, (optional)
         first sample to include (first is 0). If omitted, defaults to the first
-        sample in data
-
-    stop: int, (optional)
+        sample in data.
+    stop : int, (optional)
         First sample to not include.
         If omitted, data is included to the end.
-
-    sel: array, optional
-        Indices of channels to select
-
-    data_buffer: array, optional
-        numpy array to fill with data read, must have the correct shape
-
-    verbose: bool
-        Use verbose output
+    sel : array, optional
+        Indices of channels to select.
+    data_buffer : array or str, optional
+        numpy array to fill with data read, must have the correct shape.
+        If str, a np.memmap with the correct data type will be used
+        to store the data.
+    verbose : bool, str, int, or None
+        If not None, override default verbose level (see mne.verbose).
+    proj : array
+        SSP operator to apply to the data.
 
     Returns
     -------
-    data: array, [channels x samples]
-       the data matrix (channels x samples)
-
-    times: array, [samples]
-        returns the time values corresponding to the samples
-
+    data : array, [channels x samples]
+       the data matrix (channels x samples).
+    times : array, [samples]
+        returns the time values corresponding to the samples.
     """
-
     if stop is None:
-        stop = raw.last_samp + 1
+        stop = raw.last_samp - raw.first_samp + 1
 
     #  Initial checks
-    start = int(start + raw.first_samp)
-    stop = int(stop + raw.first_samp)
-
-    if stop >= raw.last_samp:
-        stop = raw.last_samp + 1
+    start = int(start)
+    stop = int(stop)
+    stop = min([stop, raw.last_samp - raw.first_samp + 1])
 
     if start >= stop:
         raise ValueError('No data in this range')
 
-    if verbose:
-        print 'Reading %d ... %d  =  %9.3f ... %9.3f secs...' % (
+    logger.info('Reading %d ... %d  =  %9.3f ... %9.3f secs...' % (
                            start, stop - 1, start / float(raw.info['sfreq']),
-                           (stop - 1) / float(raw.info['sfreq'])),
+                           (stop - 1) / float(raw.info['sfreq'])))
 
     #  Initialize the data and calibration vector
     nchan = raw.info['nchan']
-    dest = 0
-    cal = np.diag(raw.cals.ravel())
 
-    if sel is None:
-        data_shape = (nchan, stop - start)
-        if data_buffer is not None:
-            if data_buffer.shape != data_shape:
-                raise ValueError('data_buffer has incorrect shape')
-            data = data_buffer
-        else:
-            data = None  # we will allocate it later, once we know the type
-        if raw.proj is None and raw.comp is None:
-            mult = None
-        else:
-            if raw.proj is None:
-                mult = raw.comp * cal
-            elif raw.comp is None:
-                mult = raw.proj * cal
-            else:
-                mult = raw.proj * raw.comp * cal
-
+    n_sel_channels = nchan if sel is None else len(sel)
+    idx = slice(None, None, None) if sel is None else sel
+    data_shape = (n_sel_channels, stop - start)
+    if isinstance(data_buffer, np.ndarray):
+        if data_buffer.shape != data_shape:
+            raise ValueError('data_buffer has incorrect shape')
+        data = data_buffer
     else:
-        data_shape = (len(sel), stop - start)
-        if data_buffer is not None:
-            if data_buffer.shape != data_shape:
-                raise ValueError('data_buffer has incorrect shape')
-            data = data_buffer
-        else:
-            data = None  # we will allocate it later, once we know the type
-        if raw.proj is None and raw.comp is None:
-            mult = None
-            cal = np.diag(raw.cals[sel].ravel())
-        else:
-            if raw.proj is None:
-                mult = raw.comp[sel, :] * cal
-            elif raw.comp is None:
-                mult = raw.proj[sel, :] * cal
-            else:
-                mult = raw.proj[sel, :] * raw.comp * cal
+        data = None  # we will allocate it later, once we know the type
 
-    do_debug = False
-    # do_debug = True
-    if cal is not None:
-        from scipy import sparse
-        cal = sparse.csr_matrix(cal)
+    if proj is not None:
+        mult = list()
+        for ri in range(len(raw._raw_lengths)):
+            mult.append(np.diag(raw.cals.ravel()))
+            if raw.comp is not None:
+                mult[ri] = np.dot(raw.comp[idx, :], mult[ri])
+            mult[ri] = np.dot(proj, mult[ri])
+    else:
+        mult = None
 
-    if mult is not None:
-        from scipy import sparse
-        mult = sparse.csr_matrix(mult)
+    # deal with having multiple files accessed by the raw object
+    cumul_lens = np.concatenate(([0], np.array(raw._raw_lengths, dtype='int')))
+    cumul_lens = np.cumsum(cumul_lens)
+    files_used = np.logical_and(np.less(start, cumul_lens[1:]),
+                                np.greater_equal(stop - 1, cumul_lens[:-1]))
 
-    for this in raw.rawdir:
+    first_file_used = False
+    s_off = 0
+    dest = 0
+    for fi in np.nonzero(files_used)[0]:
+        start_loc = raw._first_samps[fi]
+        # first iteration (only) could start in the middle somewhere
+        if not first_file_used:
+            first_file_used = True
+            start_loc += start - cumul_lens[fi]
+        stop_loc = np.min([stop - 1 - cumul_lens[fi] + raw._first_samps[fi],
+                           raw._last_samps[fi]])
+        if start_loc < raw._first_samps[fi]:
+            raise ValueError('Bad array indexing, could be a bug')
+        if stop_loc > raw._last_samps[fi]:
+            raise ValueError('Bad array indexing, could be a bug')
+        if stop_loc < start_loc:
+            raise ValueError('Bad array indexing, could be a bug')
+        len_loc = stop_loc - start_loc + 1
 
-        #  Do we need this buffer
-        if this['last'] >= start:
-            if this['ent'] is None:
-                #  Take the easy route: skip is translated to zeros
-                if do_debug:
-                    print 'S'
-                if sel is None:
-                    one = np.zeros((nchan, this['nsamp']))
+        for this in raw.rawdirs[fi]:
+
+            #  Do we need this buffer
+            if this['last'] >= start_loc:
+                if this['ent'] is None:
+                    #  Take the easy route: skip is translated to zeros
+                    logger.debug('S')
+                    one = np.zeros((n_sel_channels, this['nsamp']))
                 else:
-                    one = np.zeros((len(sel), this['nsamp']))
-            else:
-                tag = read_tag(raw.fid, this['ent'].pos)
+                    tag = read_tag(raw.fids[fi], this['ent'].pos)
 
-                # decide what datatype to use
-                if np.isrealobj(tag.data):
-                    dtype = np.float
-                else:
-                    dtype = np.complex64
-
-                #   Depending on the state of the projection and selection
-                #   we proceed a little bit differently
-                if mult is None:
-                    if sel is None:
-                        one = cal * tag.data.reshape(this['nsamp'],
-                                                     nchan).astype(dtype).T
+                    # decide what datatype to use
+                    if np.isrealobj(tag.data):
+                        dtype = np.float
                     else:
-                        one = tag.data.reshape(this['nsamp'],
-                                               nchan).astype(dtype).T
-                        one = cal * one[sel, :]
-                else:
-                    one = mult * tag.data.reshape(this['nsamp'],
-                                                  nchan).astype(dtype).T
+                        dtype = np.complex64
 
-            #  The picking logic is a bit complicated
-            if stop - 1 > this['last'] and start < this['first']:
-                #    We need the whole buffer
-                first_pick = 0
-                last_pick = this['nsamp']
-                if do_debug:
-                    print 'W'
+                    one = tag.data.reshape(this['nsamp'],
+                                           nchan).astype(dtype).T
+                    if mult is not None:  # use proj + cal factors in mult
+                        one = np.dot(mult[fi], one)
+                        one = one[idx]
+                    else:  # apply just the calibration factors
+                        one = raw.cals.ravel()[idx][:, np.newaxis] * one[idx]
 
-            elif start >= this['first']:
-                first_pick = start - this['first']
-                if stop - 1 <= this['last']:
-                    #   Something from the middle
-                    last_pick = this['nsamp'] + stop - this['last'] - 1
-                    if do_debug:
-                        print 'M'
-                else:
-                    #   From the middle to the end
+                #  The picking logic is a bit complicated
+                if stop_loc > this['last'] and start_loc < this['first']:
+                    #    We need the whole buffer
+                    first_pick = 0
                     last_pick = this['nsamp']
-                    if do_debug:
-                        print 'E'
-            else:
-                #    From the beginning to the middle
-                first_pick = 0
-                last_pick = stop - this['first']
-                if do_debug:
-                    print 'B'
+                    logger.debug('W')
 
-            #   Now we are ready to pick
-            picksamp = last_pick - first_pick
-            if picksamp > 0:
-                if data is None:
-                    # if not already done, allocate array with right type
-                    data = np.empty(data_shape, dtype=dtype)
-                data[:, dest:(dest + picksamp)] = one[:, first_pick:last_pick]
-                dest += picksamp
+                elif start_loc >= this['first']:
+                    first_pick = start_loc - this['first']
+                    if stop_loc <= this['last']:
+                        #   Something from the middle
+                        last_pick = this['nsamp'] + stop_loc - this['last']
+                        logger.debug('M')
+                    else:
+                        #   From the middle to the end
+                        last_pick = this['nsamp']
+                        logger.debug('E')
+                else:
+                    #    From the beginning to the middle
+                    first_pick = 0
+                    last_pick = stop_loc - this['first'] + 1
+                    logger.debug('B')
 
-        #   Done?
-        if this['last'] >= stop - 1:
-            if verbose:
-                print ' [done]'
-            break
+                #   Now we are ready to pick
+                picksamp = last_pick - first_pick
+                if picksamp > 0:
+                    if data is None:
+                        # if not already done, allocate array with right type
+                        if isinstance(data_buffer, basestring):
+                            # use a memmap
+                            data = np.memmap(data_buffer, mode='w+',
+                                             dtype=dtype, shape=data_shape)
+                        else:
+                            data = np.empty(data_shape, dtype=dtype)
+                    data[:, dest:(dest + picksamp)] = \
+                        one[:, first_pick:last_pick]
+                    dest += picksamp
 
-    times = (np.arange(start, stop) - raw.first_samp) / raw.info['sfreq']
+            #   Done?
+            if this['last'] >= stop_loc:
+                break
 
-    raw.fid.seek(0, 0)  # Go back to beginning of the file
+        raw.fids[fi].seek(0, 0)  # Go back to beginning of the file
+        s_off += len_loc
+        # double-check our math
+        if not s_off == dest:
+            raise ValueError('Incorrect file reading')
+
+    logger.info('[done]')
+    times = np.arange(start, stop) / raw.info['sfreq']
 
     return data, times
 
 
-def read_raw_segment_times(raw, start, stop, sel=None, verbose=True):
+@verbose
+def read_raw_segment_times(raw, start, stop, sel=None, verbose=None):
     """Read a chunck of raw data
 
     Parameters
     ----------
     raw: Raw object
-        An instance of Raw
-
+        An instance of Raw.
     start: float
-        Starting time of the segment in seconds
-
+        Starting time of the segment in seconds.
     stop: float
-        End time of the segment in seconds
-
+        End time of the segment in seconds.
     sel: array, optional
-        Indices of channels to select
-
+        Indices of channels to select.
     node: tree node
-        The node of the tree where to look
-
-    verbose: bool
-        Use verbose output
+        The node of the tree where to look.
+    verbose : bool, str, int, or None
+        If not None, override default verbose level (see mne.verbose).
 
     Returns
     -------
     data: array, [channels x samples]
-       the data matrix (channels x samples)
-
+       the data matrix (channels x samples).
     times: array, [samples]
-        returns the time values corresponding to the samples
+        returns the time values corresponding to the samples.
     """
     #   Convert to samples
     start = floor(start * raw.info['sfreq'])
     stop = ceil(stop * raw.info['sfreq'])
 
     #   Read it
-    return read_raw_segment(raw, start, stop, sel, verbose=verbose)
+    return read_raw_segment(raw, start, stop, sel)
 
 ###############################################################################
 # Writing
@@ -905,7 +1242,7 @@ def start_writing_raw(name, info, sel=None):
         Name of the file to create.
 
     info : dict
-        Measurement info
+        Measurement info.
 
     sel : array of int, optional
         Indices of channels to include. By default all channels are included.
@@ -913,10 +1250,10 @@ def start_writing_raw(name, info, sel=None):
     Returns
     -------
     fid : file
-        The file descriptor
+        The file descriptor.
 
     cals : list
-        calibration factors
+        calibration factors.
     """
     #
     #  Create the file and save the essentials
@@ -972,13 +1309,13 @@ def write_raw_buffer(fid, buf, cals):
     Parameters
     ----------
     fid : file descriptor
-        an open raw data file
+        an open raw data file.
 
     buf : array
-        The buffer to write
+        The buffer to write.
 
     cals : array
-        Calibration factors
+        Calibration factors.
     """
     if buf.shape[0] != len(cals):
         raise ValueError('buffer and calibration sizes do not match')
@@ -996,7 +1333,7 @@ def finish_writing_raw(fid):
     Parameters
     ----------
     fid : file descriptor
-        an open raw data file
+        an open raw data file.
     """
     end_block(fid, FIFF.FIFFB_RAW_DATA)
     end_block(fid, FIFF.FIFFB_MEAS)
@@ -1006,3 +1343,48 @@ def finish_writing_raw(fid):
 def _envelope(x):
     """ Compute envelope signal """
     return np.abs(hilbert(x))
+
+
+def _check_raw_compatibility(raw):
+    """Check to make sure all instances of Raw
+    in the input list raw have compatible parameters"""
+    for ri in range(1, len(raw)):
+        if not raw[ri].info['nchan'] == raw[0].info['nchan']:
+            raise ValueError('raw[%d][\'info\'][\'nchan\'] must match' % ri)
+        if not raw[ri].info['bads'] == raw[0].info['bads']:
+            raise ValueError('raw[%d][\'info\'][\'bads\'] must match' % ri)
+        if not raw[ri].info['sfreq'] == raw[0].info['sfreq']:
+            raise ValueError('ra[%d][\'info\'][\'sfreq\'] must match' % ri)
+        if not set(raw[ri].info['ch_names']) \
+                   == set(raw[0].info['ch_names']):
+            raise ValueError('raw[%d][\'info\'][\'ch_names\'] must match' % ri)
+        if not all(raw[ri].cals == raw[0].cals):
+            raise ValueError('raw[%d].cals must match' % ri)
+        if len(raw[0].info['projs']) != len(raw[ri].info['projs']):
+            raise ValueError('SSP projectors in raw files must be the same')
+        if not all(proj_equal(p1, p2) for p1, p2 in
+                   zip(raw[0].info['projs'], raw[ri].info['projs'])):
+            raise ValueError('SSP projectors in raw files must be the same')
+
+
+def concatenate_raws(raws, preload=None):
+    """Concatenate raw instances as if they were continuous. Note that raws[0]
+    is modified in-place to achieve the concatenation.
+
+    Parameters
+    ----------
+    raws : list
+        list of Raw instances to concatenate (in order).
+
+    preload : bool, or None
+        If None, preload status is inferred using the preload status of the
+        raw files passed in. True or False sets the resulting raw file to
+        have or not have data preloaded.
+
+    Returns
+    -------
+    raw : instance of Raw
+        The result of the concatenation (first Raw instance passed in).
+    """
+    raws[0].append(raws[1:], preload)
+    return raws[0]
