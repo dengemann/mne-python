@@ -822,13 +822,8 @@ class ICA(object):
         else:
             kwargs['random_state'] = 0
 
-        _pca = RandomizedPCA(**kwargs)
-
-        pca = Bunch()
-        for attr in ['explained_variance_', 'explained_variance_ratio_',
-                     'mean_', 'components_']:
-            setattr(pca, attr, _pca.__dict__[attr])
-        pca_data = _pca.fit_transform(data.T)
+        pca = RandomizedPCA(**kwargs)
+        pca_data = pca.fit_transform(data.T)
 
         if self._explained_var > 1.0:
             if self.n_components is not None:  # normal n case
@@ -846,12 +841,20 @@ class ICA(object):
             self.n_components = len(self._comp_idx)
 
         self._ica.fit(to_ica)
-        self._ica_unmixing_matrix
-        self._unmixing = self._ica.unmixing_matrix_
+        try:  # this will work for sklearn > 0.13
+            self._unmixing = self._ica.components_
+        except:
+            self._unmixing = self._ica.unmixing_matrix
         self.current_fit = caller
-        self._params_ica = get_params_ica(self._ica)
-        self._params_pca = get_params_pca(_pca)
-        self._pca = pca
+
+        self._pca = Bunch()
+        for attr in ['explained_variance_', 'explained_variance_ratio_',
+                     'mean_', 'components_']:
+            setattr(self._pca, attr, pca.__dict__[attr])
+        self._params_pca = dict((k, vars(pca).get(k, 'NA')) for k in
+                                PCA_PARAMS)
+        self._params_ica = dict((k, vars(self._ica).get(k, 'NA')) for k in
+                                ICA_PARAMS)
         del self._ica
 
     def _pick_sources(self, sources, pca_data, include, exclude,
@@ -868,7 +871,7 @@ class ICA(object):
             sources[exclude, :] = 0.  # just exclude
 
         # restore pca data
-        pca_restored = np.dot(sources.T, self.mixing)
+        pca_restored = np.dot(sources.T, self.mixing_matrix)
 
         # re-append deselected pca dimension if desired
         if n_pca_components - self.n_components > 0:
@@ -904,10 +907,10 @@ class ICA(object):
 
         """
         X = np.atleast_2d(data)
-        if self.mean_ is not None:
-            X = X - self.mean_
+        if self._pca.mean_ is not None:
+            X = X - self._pca.mean_
 
-        X = np.dot(X, self.components_.T)
+        X = np.dot(X, self._pca.components_.T)
         return X
 
     def _transform_ica(self, data):
@@ -1135,16 +1138,6 @@ def _write_ica(fid, ica):
     end_block(fid, FIFF.FIFFB_ICA)
 
 
-def get_params_ica(ica):
-    """Aux function"""
-    return dict((k, vars(ica).get(k, 'NA')) for k in ICA_PARAMS)
-
-
-def get_params_pca(pca):
-    """Aux function"""
-    return dict((k, vars(pca).get(k, 'NA')) for k in PCA_PARAMS)
-
-
 @verbose
 def read_ica(fname):
     """ Restore ICA sessions from fif file.
@@ -1172,7 +1165,6 @@ def read_ica(fname):
         raise ValueError('Could not find ICA data')
 
     my_ica_data = ica_data[0]
-    ica_components_ = None
     for d in my_ica_data['directory']:
         kind = d.kind
         pos = d.pos
@@ -1233,4 +1225,4 @@ def read_ica(fname):
 
     logger.info('Ready.')
 
-    return ica_components_
+    return ica

@@ -180,15 +180,7 @@ def test_ica_additional():
 
         assert_true(ica.ch_names == ica_read.ch_names)
 
-        try:
-            a = ica._ica.components_
-            b = ica_read._ica.components_
-        except:
-            a = ica._ica.unmixing_matrix_
-            b = ica_read._ica.unmixing_matrix_
-
-        assert_array_equal(a, b)
-        assert_array_equal(ica._mixing, ica_read._mixing)
+        assert_array_equal(ica.mixing_matrix, ica_read.mixing_matrix)
         assert_array_equal(ica._pca.components_,
                            ica_read._pca.components_)
         assert_array_equal(ica._pca.mean_,
