@@ -109,7 +109,7 @@ def _plot_topo_onpick(event, show_func=None, tmin=None, tmax=None,
                       vmin=None, vmax=None, colorbar=False, title=None,
                       x_label=None, y_label=None):
     """Onpick callback that shows a single channel in a new figure"""
-    if event.mouseevent.inaxes is None:
+    if event.mouseevent.inaxes is None or event.mouseevent.button != 1:
         return
     artist = event.artist
     try:
