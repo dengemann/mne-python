@@ -123,6 +123,7 @@ def test_read_write_epochs():
 
     # test copying loaded one (raw property)
     epochs_read4 = epochs_read3.copy()
+    epochs_read4['1']
     assert_array_almost_equal(epochs_read4.get_data(), data)
 
 
@@ -480,10 +481,15 @@ def test_access_by_name():
     epochs = Epochs(raw, events, {'a': 1, 'b': 2}, tmin, tmax, picks=picks)
     epochs.drop_bad_epochs()
     assert_raises(KeyError, epochs.__getitem__, 'bar')
+    epochs.save(op.join(tempdir, 'test-epo.fif'))
+    epochs2 = read_epochs(op.join(tempdir, 'test-epo.fif'))
 
-    data = epochs['a'].get_data()
-    event_a = events[events[:, 2] == 1]
-    assert_true(len(data) == len(event_a))
+    for ep in [epochs, epochs2]:
+        data = ep['a'].get_data()
+        event_a = events[events[:, 2] == 1]
+        assert_true(len(data) == len(event_a))
+
+    assert_true(epochs2['a'].events.shape == epochs['a'].events.shape)
 
 
 @pandas_test
