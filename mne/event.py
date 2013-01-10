@@ -98,7 +98,7 @@ def define_target_events(events, reference_id, target_id, sfreq, tmin, tmax,
     new_events : ndarray
         The new defined events
     lag : ndarray
-        time lag between reference and target in  milliseconds.
+        time lag between reference and target in milliseconds.
     """
 
     if new_id is None:
@@ -110,7 +110,7 @@ def define_target_events(events, reference_id, target_id, sfreq, tmin, tmax,
 
     new_events = []
     lag = []
-    for event in events.copy().astype('i4'):
+    for event in events.copy().astype('i8'):
         if event[2] == reference_id:
             lower = event[0] + imin
             upper = event[0] + imax
