@@ -121,6 +121,15 @@ class Raw(object):
             # Now file can be removed
             os.remove(filename)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception_val, trace):
+        try:
+            self.close()
+        except:
+            return exception_type, exception_val
+
     def _preload_data(self, preload):
         """This function actually preloads the data"""
         if isinstance(preload, basestring):

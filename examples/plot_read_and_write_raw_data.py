@@ -19,7 +19,8 @@ data_path = sample.data_path()
 
 fname = data_path + '/MEG/sample/sample_audvis_raw.fif'
 
-raw = fiff.Raw(fname)
+with fiff.Raw(fname) as raw:
+    print raw
 
 # Set up pick list: MEG + STI 014 - bad channels
 want_meg = True
