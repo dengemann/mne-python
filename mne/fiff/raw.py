@@ -122,13 +122,16 @@ class Raw(object):
             os.remove(filename)
 
     def __enter__(self):
+        """ Entering with block """
         return self
 
     def __exit__(self, exception_type, exception_val, trace):
+        """ Exiting with block """
         try:
             self.close()
+            del self
         except:
-            return exception_type, exception_val
+            return exception_type, exception_val, trace
 
     def _preload_data(self, preload):
         """This function actually preloads the data"""

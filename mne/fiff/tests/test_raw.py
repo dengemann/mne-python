@@ -659,3 +659,13 @@ def test_save():
     assert_raises(ValueError, new_raw.save, new_fname)
     new_raw.close()
     os.remove(new_fname)
+
+
+def test_with_statement():
+    """ Test with statement """
+    for preload in [True, False]:
+        with Raw(fif_fname, preload=preload) as raw_:
+            print raw_
+    raw_ = Raw(fif_fname, preload=preload)
+    assert_true('raw_' in globals())
+    
