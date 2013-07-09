@@ -906,20 +906,20 @@ class ICA(object):
         source_idx : int | array-like
             The indices of the sources to be plotted.
         ch_type : 'mag' | 'grad' | 'planar1' | 'planar2' | 'eeg'
-            The channel type to plot. For 'grad', the gradiometers are collected in
-            pairs and the RMS for each pair is plotted.
+            The channel type to plot. For 'grad', the gradiometers are
+            collected in pairs and the RMS for each pair is plotted.
         layout : None | Layout
             Layout instance specifying sensor positions (does not need to
             be specified for Neuromag data). If possible, the correct layout is
             inferred from the data.
         vmax : scalar
-            The value specfying the range of the color scale (-vmax to +vmax). If
-            None, the largest absolute value in the data is used.
+            The value specfying the range of the color scale (-vmax to +vmax).
+            If None, the largest absolute value in the data is used.
         cmap : matplotlib colormap
             Colormap.
         sensors : bool | str
-            Add markers for sensor locations to the plot. Accepts matplotlib plot
-            format string (e.g., 'r+' for red plusses).
+            Add markers for sensor locations to the plot. Accepts matplotlib
+            plot format string (e.g., 'r+' for red plusses).
         colorbar : bool
             Plot a colorbar.
         res : int
