@@ -1068,20 +1068,19 @@ class ICA(object):
             kwargs['random_state'] = 0
 
         pca = RandomizedPCA(**kwargs)
-        pca_data = pca.fit_transform(data.T)
+        data = pca.fit_transform(data.T)
 
         if isinstance(self.n_components, float):
             logger.info('Selecting PCA components by explained variance.')
             n_components_ = np.sum(pca.explained_variance_ratio_.cumsum()
                                    < self.n_components)
-            to_ica = pca_data[:, :n_components_]
+            data = data[:, :n_components_]
         else:
             logger.info('Selecting PCA components by number.')
             if self.n_components is not None:  # normal n case
-                to_ica = pca_data[:, :self.n_components]
+                data = data[:, :self.n_components]
             else:  # None case
                 logger.info('Using all PCA components.')
-                to_ica = pca_data
 
         # the things to store for PCA
         self.pca_components_ = pca.components_
@@ -1089,7 +1088,7 @@ class ICA(object):
         self.pca_explained_variance_ = pca.explained_variance_
         # and store number of components as it may be smaller than
         # pca.components_.shape[1]
-        self.n_components_ = to_ica.shape[1]
+        self.n_components_ = data.shape[1]
 
         # Take care of ICA
         try:
@@ -1111,7 +1110,7 @@ class ICA(object):
                 kwargs['random_state'] = self.random_state
 
         ica = FastICA(**kwargs)
-        ica.fit(to_ica)
+        ica.fit(data)
 
         # For ICA the only thing to store is the unmixing matrix
         if not hasattr(ica, 'sources_'):
