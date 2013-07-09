@@ -1089,6 +1089,7 @@ class ICA(object):
         # and store number of components as it may be smaller than
         # pca.components_.shape[1]
         self.n_components_ = data.shape[1]
+        del pca
 
         # Take care of ICA
         try:
