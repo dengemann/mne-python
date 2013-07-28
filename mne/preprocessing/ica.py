@@ -1163,7 +1163,7 @@ class ICA(object):
         """
         X = np.atleast_2d(data)
         if self.pca_mean_ is not None:
-            X -= self.pca_mean_
+            X = X - self.pca_mean_
 
         X = np.dot(X, self.pca_components_.T)
         return X
