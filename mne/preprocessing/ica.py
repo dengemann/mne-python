@@ -27,7 +27,7 @@ from .eog import _find_eog_events
 from ..cov import compute_whitener
 from .. import Covariance
 from ..fiff.pick import pick_types, pick_channels, pick_info, \
-                        channel_indices_by_type
+                        channel_indices_by_type, channel_type
 from ..fiff.write import write_double_matrix, write_string, \
                          write_name_list, write_int, start_block, \
                          end_block
@@ -245,18 +245,22 @@ class ICA(object):
         decim : int | None
             Increment for selecting each nth time slice. If None, all samples
             within ``start`` and ``stop`` are used.
-        reject : dict | None
+        reject : dict
             Rejection parameters based on peak to peak amplitude.
             Valid keys are 'grad' | 'mag' | 'eeg' | 'eog' | 'ecg'.
-            If reject is None then no rejection is done. You should
-            use such parameters to reject big measurement artifacts
-            and not EOG for example.
-        flat : dict | None
+            If reject is None then no rejection is done. Example::
+
+                reject = dict(grad=4000e-13, # T / m (gradiometers)
+                              mag=4e-12, # T (magnetometers)
+                              eeg=40e-6, # uV (EEG channels)
+                              eog=250e-6 # uV (EOG channels)
+                              )
+        flat : dict
             Rejection parameters based on flatness of signal
             Valid keys are 'grad' | 'mag' | 'eeg' | 'eog' | 'ecg'
             If flat is None then no rejection is done.
         tstep : float
-            Length of data chunks for artefact rejection in seconds.
+            Size of data chunks for artefact rejection.
         verbose : bool, str, int, or None
             If not None, override default verbose level (see mne.verbose).
             Defaults to self.verbose.
@@ -285,35 +289,28 @@ class ICA(object):
         self.info = pick_info(raw.info, picks)
         self.ch_names = self.info['ch_names']
         start, stop = _check_start_stop(raw, start, stop)
-
-        data = raw[picks, start:stop][0]
-        if decim is not None:
-            data = data[:, ::decim].copy()
-
-        if (reject is not None) or (flat is not None):
-            info = self.info
-            data_clean = np.empty_like(data)
-            idx_by_type = channel_indices_by_type(info)
-            step = int(ceil(tstep * info['sfreq']))
-            if decim is not None:
-                step = int(ceil(step / float(decim)))
-            this_start = 0
-            this_stop = 0
-            for first in xrange(0, data.shape[1], step):
-                last = first + step
-                data_buffer = data[:, first:last]
-                if data_buffer.shape[1] < (last - first):
-                    break  # end of the time segment
-                if _is_good(data_buffer, info['ch_names'], idx_by_type, reject,
-                            flat, ignore_chs=info['bads']):
-                    this_stop = this_start + data_buffer.shape[1]
-                    data_clean[:, this_start:this_stop] = data_buffer
-                    this_start += data_buffer.shape[1]
-                else:
-                    logger.info("Artifact detected in [%d, %d]" % (first,
-                                                                   last))
-            data = data_clean[:, :this_stop]
-
+        info = self.info
+        data = np.empty((len(picks), len(np.arange(stop - start)[::decim])))
+        idx_by_type = channel_indices_by_type(info)
+        step = int(ceil(tstep * raw.info['sfreq']))
+        this_start = 0
+        this_stop = 0
+        for first in xrange(start, stop, step):
+            last = first + step
+            if last > stop:
+                last = stop
+            raw_segment, times = raw[picks, first:last]
+            if raw_segment.shape[1] < (last - first):
+                break
+            if _is_good(raw_segment, info['ch_names'], idx_by_type, reject,
+                       flat, ignore_chs=info['bads']):
+                raw_segment = raw_segment[:, ::decim]
+                this_stop = this_start + raw_segment.shape[1]
+                data[:, this_start:this_stop] = raw_segment
+                this_start += raw_segment.shape[1]
+            else:
+                logger.info("Artifact detected in [%d, %d]" % (first, last))
+        data = data[:, :this_stop]
         if not data.any():
             raise RuntimeError('No clean segment found. Please '
                                'consider updating your rejection '
@@ -1091,8 +1088,16 @@ class ICA(object):
     def _pre_whiten(self, data, info, picks):
         """Aux function"""
         if self.noise_cov is None:  # use standardization as whitener
-            pre_whitener = np.atleast_1d(np.std(data)) ** -1
-            data *= pre_whitener
+            
+            iter_types = [[ii for ii in picks if channel_type(info, ii) == k]
+                          for k in 'eeg', 'grad', 'meg']
+            for idx in iter_types:                
+                if not idx:
+                    break
+                import pdb;pdb.set_trace()
+                pre_whitener = np.atleast_1d(np.std(data[idx])) ** -1
+                data[idx] *= pre_whitener
+
         elif not hasattr(self, '_pre_whitener'):  # pick cov
             ncov = deepcopy(self.noise_cov)
             if data.shape[0] != ncov['data'].shape[0]:
@@ -1245,8 +1250,14 @@ def _check_n_pca_components(ica, _n_pca_comp, verbose=None):
 
 def _check_start_stop(raw, start, stop):
     """Aux function"""
-    return [c if (isinstance(c, int) or c is None) else
+ 
+    start, stop = [c if (isinstance(c, int) or c is None) else
                    raw.time_as_index(c)[0] for c in start, stop]
+    if start is None:
+        start = 0
+    if stop is None:
+        stop = raw.last_samp
+    return start, stop
 
 
 @verbose
