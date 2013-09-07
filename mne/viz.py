@@ -1444,6 +1444,61 @@ def plot_sparse_source_estimates(src, stcs, colors=None, linewidth=2,
     return surface
 
 
+def _plot_svd(cov_data, idx_names, labels=None):
+    """Aux function
+    """
+    import pylab as pl
+    if not type(cov_data) in [list, tuple]:
+        cov_data = [cov_data]
+    if labels is None:
+        if len(cov_data) > 1:
+            labels = ['#%i' % i for i in range(len(cov_data))]
+        else:
+            labels = [None]
+
+    fig, axes = pl.subplots(1,  len(idx_names))
+    axes = axes if isinstance(axes, np.ndarray) else [axes]
+    for k, ((idx, name, unit, scaling), ax) in enumerate(zip(idx_names,
+                                                         axes)):
+        for C, this_label in zip(cov_data, labels):
+            _, s, _ = linalg.svd(C[idx][:, idx])
+            ax.semilogy(np.sqrt(s) * scaling, label=this_label)
+        ax.set_ylabel('Noise std (%s)' % unit)
+        ax.set_xlabel('Eigenvalue index')
+        ax.set_title(name)
+    if labels[0]:
+        pl.legend()
+    tight_layout()
+    return fig
+
+
+def _prepare_plot_cov(cov, info, exclude):
+    """ Aux function
+    """
+    if exclude == 'bads':
+        exclude = info['bads']
+    ch_names = [n for n in cov.ch_names if not n in exclude]
+    ch_idx = [cov.ch_names.index(n) for n in ch_names]
+    info_ch_names = info['ch_names']
+    sel_eeg = pick_types(info, meg=False, eeg=True, exclude=exclude)
+    sel_mag = pick_types(info, meg='mag', eeg=False, exclude=exclude)
+    sel_grad = pick_types(info, meg='grad', eeg=False, exclude=exclude)
+    idx_eeg = [ch_names.index(info_ch_names[c])
+               for c in sel_eeg if info_ch_names[c] in ch_names]
+    idx_mag = [ch_names.index(info_ch_names[c])
+               for c in sel_mag if info_ch_names[c] in ch_names]
+    idx_grad = [ch_names.index(info_ch_names[c])
+                for c in sel_grad if info_ch_names[c] in ch_names]
+
+    idx_names = [(idx_eeg, 'EEG covariance', 'uV', 1e6),
+                 (idx_grad, 'Gradiometers', 'fT/cm', 1e13),
+                 (idx_mag, 'Magnetometers', 'fT', 1e15)]
+    idx_names = [(idx, name, unit, scaling)
+                 for idx, name, unit, scaling in idx_names if len(idx) > 0]
+
+    return cov.data[ch_idx][:, ch_idx], idx_names, ch_names
+
+
 @verbose
 def plot_cov(cov, info, exclude=[], colorbar=True, proj=False, show_svd=True,
              show=True, verbose=None):
@@ -1470,29 +1525,8 @@ def plot_cov(cov, info, exclude=[], colorbar=True, proj=False, show_svd=True,
     verbose : bool, str, int, or None
         If not None, override default verbose level (see mne.verbose).
     """
-    if exclude == 'bads':
-        exclude = info['bads']
-    ch_names = [n for n in cov.ch_names if not n in exclude]
-    ch_idx = [cov.ch_names.index(n) for n in ch_names]
-    info_ch_names = info['ch_names']
-    sel_eeg = pick_types(info, meg=False, eeg=True, exclude=exclude)
-    sel_mag = pick_types(info, meg='mag', eeg=False, exclude=exclude)
-    sel_grad = pick_types(info, meg='grad', eeg=False, exclude=exclude)
-    idx_eeg = [ch_names.index(info_ch_names[c])
-               for c in sel_eeg if info_ch_names[c] in ch_names]
-    idx_mag = [ch_names.index(info_ch_names[c])
-               for c in sel_mag if info_ch_names[c] in ch_names]
-    idx_grad = [ch_names.index(info_ch_names[c])
-                for c in sel_grad if info_ch_names[c] in ch_names]
 
-    idx_names = [(idx_eeg, 'EEG covariance', 'uV', 1e6),
-                 (idx_grad, 'Gradiometers', 'fT/cm', 1e13),
-                 (idx_mag, 'Magnetometers', 'fT', 1e15)]
-    idx_names = [(idx, name, unit, scaling)
-                 for idx, name, unit, scaling in idx_names if len(idx) > 0]
-
-    C = cov.data[ch_idx][:, ch_idx]
-
+    C, idx_names, ch_names = _prepare_plot_cov(cov, info, exclude)
     if proj:
         projs = copy.deepcopy(info['projs'])
 
@@ -1510,7 +1544,6 @@ def plot_cov(cov, info, exclude=[], colorbar=True, proj=False, show_svd=True,
                         'channels.')
 
     import pylab as pl
-
     pl.figure(figsize=(2.5 * len(idx_names), 2.7))
     for k, (idx, name, _, _) in enumerate(idx_names):
         pl.subplot(1, len(idx_names), k + 1)
@@ -1520,16 +1553,7 @@ def plot_cov(cov, info, exclude=[], colorbar=True, proj=False, show_svd=True,
     tight_layout()
 
     if show_svd:
-        pl.figure()
-        for k, (idx, name, unit, scaling) in enumerate(idx_names):
-            _, s, _ = linalg.svd(C[idx][:, idx])
-            pl.subplot(1, len(idx_names), k + 1)
-            pl.ylabel('Noise std (%s)' % unit)
-            pl.xlabel('Eigenvalue index')
-            pl.semilogy(np.sqrt(s) * scaling)
-            pl.title(name)
-            tight_layout()
-
+        _plot_svd(C, idx_names)
     if show:
         pl.show()
 
