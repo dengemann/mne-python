@@ -400,7 +400,7 @@ class Evoked(ProjMixin):
     def plot_topomap(self, times=None, ch_type='mag', layout=None, vmax=None,
                      cmap='RdBu_r', sensors='k,', colorbar=True, scale=None,
                      unit=None, res=256, size=1, format="%3.1f", proj=False,
-                     show=True):
+                     title_format='%i ms', show=True):
         """Plot topographic maps of specific time points
 
         Parameters
@@ -442,13 +442,16 @@ class Evoked(ProjMixin):
             If true SSP projections are applied before display. If 'interactive',
             a check box for reversible selection of SSP projection vectors will
             be shown.
+        title_format : str
+            String format for topomaps titles.
         show : bool
             Call pylab.show() at the end.
         """
         plot_evoked_topomap(self, times=times, ch_type=ch_type, layout=layout,
                             vmax=vmax, cmap=cmap, sensors=sensors,
                             colorbar=colorbar, scale=scale, unit=unit, res=res,
-                            proj=proj, size=size, format=format)
+                            proj=proj, size=size, format=format,
+                            title_format=title_format)
 
     def to_nitime(self, picks=None):
         """Export Evoked object to NiTime

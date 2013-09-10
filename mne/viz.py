@@ -763,7 +763,7 @@ def plot_topo_image_epochs(epochs, layout=None, sigma=0.3, vmin=None,
 def plot_evoked_topomap(evoked, times=None, ch_type='mag', layout=None,
                         vmax=None, cmap='RdBu_r', sensors='k,', colorbar=True,
                         scale=None, unit=None, res=256, size=1, format='%3.1f',
-                        proj=False, show=True):
+                        proj=False, title_format='%i ms', show=True):
     """Plot topographic maps of specific time points of evoked data
 
     Parameters
@@ -806,6 +806,8 @@ def plot_evoked_topomap(evoked, times=None, ch_type='mag', layout=None,
         If true SSP projections are applied before display. If 'interactive',
         a check box for reversible selection of SSP projection vectors will
         be show.
+    title_format : str
+        String format for topomaps titles.
     show : bool
         Call pylab.show() at the end.
     """
@@ -860,7 +862,7 @@ def plot_evoked_topomap(evoked, times=None, ch_type='mag', layout=None,
         pl.subplot(1, nax, i + 1)
         images.append(plot_topomap(data[:, i], pos, vmax=vmax, cmap=cmap,
                       sensors=sensors, res=res))
-        pl.title('%i ms' % (t * 1000))
+        pl.title(title_format % (t * 1000))
 
     if colorbar:
         cax = pl.subplot(1, n + 1, n + 1)
@@ -1444,7 +1446,7 @@ def plot_sparse_source_estimates(src, stcs, colors=None, linewidth=2,
     return surface
 
 
-def _plot_svd(cov_data, idx_names, labels=None):
+def _plot_svd(cov_data, idx_names, labels=None, figsize=None):
     """Aux function
     """
     import pylab as pl
@@ -1456,7 +1458,7 @@ def _plot_svd(cov_data, idx_names, labels=None):
         else:
             labels = [None]
 
-    fig, axes = pl.subplots(1,  len(idx_names))
+    fig, axes = pl.subplots(1,  len(idx_names), figsize=figsize)
     axes = axes if isinstance(axes, np.ndarray) else [axes]
     for k, ((idx, name, unit, scaling), ax) in enumerate(zip(idx_names,
                                                          axes)):
