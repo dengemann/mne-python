@@ -37,6 +37,7 @@ from ..viz import plot_ica_panel, plot_ica_topomap
 from ..fiff.write import start_file, end_file, write_id
 from ..epochs import _is_good
 from ..utils import check_sklearn_version, logger, verbose
+from ..parallel import parallel_func
 
 try:
     from sklearn.utils.extmath import fast_dot
@@ -1764,3 +1765,77 @@ def run_ica(raw, n_components, max_pca_components=100,
                       var_criterion=var_criterion,
                       add_nodes=add_nodes)
     return ica
+
+
+def _run_restarts(ica, raw, picks, start, stop,
+                  decim, reject, flat, tstep,
+                  random_state, verbose):
+    """Aux function
+    """
+    ica = deepcopy(ica)
+    ica.random_state = random_state
+    ica.decompose_raw(raw, picks, start, stop, decim, reject, flat,
+                      tstep, verbose)
+    return ica
+
+
+def ica_with_restarts(ica, raw, picks=None, start=None, stop=None,
+                      decim=None, reject=None, flat=None, tstep=2.0,
+                      randint=100, n_restarts=5, n_jobs=2,
+                      verbose=None):
+    """Run ICA with restarts to pick the best solution
+
+    Parameters
+    ----------
+    ica : instance of mne.preprocessing.ICA
+        The ica object to use.
+    raw : instance of mne.fiff.Raw
+        The raw data to fit.
+    raw : instance of mne.fiff.Raw
+            Raw measurements to be decomposed.
+    picks : array-like
+        Channels to be included. This selection remains throughout the
+        initialized ICA session. If None only good data channels are used.
+    start : int | float | None
+        First sample to include. If float, data will be interpreted as
+        time in seconds. If None, data will be used from the first sample.
+    stop : int | float | None
+        Last sample to not include. If float, data will be interpreted as
+        time in seconds. If None, data will be used to the last sample.
+    decim : int | None
+        Increment for selecting each nth time slice. If None, all samples
+        within ``start`` and ``stop`` are used.
+    reject : dict | None
+        Rejection parameters based on peak to peak amplitude.
+        Valid keys are 'grad' | 'mag' | 'eeg' | 'eog' | 'ecg'.
+        If reject is None then no rejection is done. You should
+        use such parameters to reject big measurement artifacts
+        and not EOG for example.
+    flat : dict | None
+        Rejection parameters based on flatness of signal
+        Valid keys are 'grad' | 'mag' | 'eeg' | 'eog' | 'ecg'
+        If flat is None then no rejection is done.
+    tstep : float
+        Length of data chunks for artefact rejection in seconds.
+    randint : int
+        The number range to draw integers from for
+        resetting the random state.
+    n_restarts : int
+        The number of restarts to compute.
+    n_jobs : int
+        The number of parallel jobs to use.
+    verbose : bool, str, int, or None
+        If not None, override default verbose level (see mne.verbose).
+        Defaults to self.verbose.
+
+    Returns
+    -------
+    icas : list
+        The n == n_jobs ica solutions.
+    """
+    parallel, func, _ = parallel_func(_run_restarts, n_jobs)
+    return parallel(func(ica=ica, raw=raw, picks=picks, start=start, stop=stop,
+                    decim=decim, reject=reject, flat=flat, tstep=tstep,
+                    random_state=np.random.randint(randint),
+                    verbose=verbose)
+                    for k in range(n_restarts))
