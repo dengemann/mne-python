@@ -109,6 +109,7 @@ class _BaseEpochs(ProjMixin):
         if dest_comp is not None or keep_comp is not None:
             raise ValueError('current_comp and keep_comp are deprecated.'
                              ' Use the compensation parameter in Raw.')
+        self.info['comps'] = []
 
         # Handle times
         if tmin >= tmax:
