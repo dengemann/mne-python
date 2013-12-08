@@ -23,8 +23,8 @@ from shutil import rmtree
 import atexit
 from math import log
 import json
-from six.moves import urllib
-from six import string_types
+from .externals.six.moves import urllib
+from .externals.six import string_types
 import ftplib
 import scipy
 from scipy import linalg
