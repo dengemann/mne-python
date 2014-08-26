@@ -318,8 +318,9 @@ def _find_clusters(x, threshold, tail=0, connectivity=None, max_step=1,
             stop = np.max(x)
         else:  # tail == 0
             stop = np.max(np.abs(x))
-        thresholds = np.arange(threshold['start'], stop,
-                               threshold['step'], float)
+        thresholds = (np.arange(threshold['start'], stop,
+                               threshold['step'], float) if isinstance(threshold, (float, int)
+                               else threshold['start'])
         h_power = threshold.get('h_power', 2)
         e_power = threshold.get('e_power', 0.5)
         if show_info is True:
