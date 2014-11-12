@@ -120,7 +120,7 @@ Look at the channels in raw:
 
 Read and plot a segment of raw data
 
-    .. code:: Python
+.. code:: Python
 
     >>> start, stop = raw.time_as_index([100, 115])  # 100 s to 115 s data segment
     >>> data, times = raw[:, start:stop]
