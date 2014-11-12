@@ -109,6 +109,7 @@ Custom plots can be added to the report. Let us first generate a custom plot:
     >>> fig = evoked.plot() # doctest: +SKIP
 
 To add the custom plot to the report, do:
+
 .. code:: Python
 
     >>> report.add_figs_to_section(fig, captions='Left Auditory', section='evoked') # doctest: +SKIP
