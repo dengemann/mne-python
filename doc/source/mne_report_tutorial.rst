@@ -55,11 +55,13 @@ The Python interface
 
 The same functionality can also be achieved using the Python interface. Import
 the required functions:
+.. code:: Python
 
     >>> from mne.report import Report
     >>> from mne.datasets import sample
 
 Generate the report:
+.. code:: Python
 
     >>> path = sample.data_path()
     >>> report = Report(verbose=True)
@@ -70,6 +72,7 @@ Generate the report:
     Embedding : bootstrap.min.css
 
 Only include \*-eve.fif files in the report:
+.. code:: Python
 
     >>> report.parse_folder(data_path=path, pattern='*-eve.fif') # doctest: +SKIP
     Rendering : .../MNE-sample-data/MEG/sample/sample_audvis_filt-0-40_raw-eve.fif
@@ -79,12 +82,14 @@ Only include \*-eve.fif files in the report:
     Rendering : .../MNE-sample-data/MEG/sample/sample_audvis_ecg-eve.fif
 
 Save the report as an html, but do not open the html in a browser:
+.. code:: Python
 
     >>> report.save('report.html', overwrite=True, open_browser=False) # doctest:+SKIP
     Rendering : Table of Contents...
 
 There is greater flexibility compared to the command line interface. 
 Custom plots can be added to the report. Let us first generate a custom plot:
+.. code:: Python
 
     >>> from mne import read_evokeds
     >>> fname = path + '/MEG/sample/sample_audvis-ave.fif'
@@ -104,6 +109,7 @@ Custom plots can be added to the report. Let us first generate a custom plot:
     >>> fig = evoked.plot() # doctest: +SKIP
 
 To add the custom plot to the report, do:
+.. code:: Python
 
     >>> report.add_figs_to_section(fig, captions='Left Auditory', section='evoked') # doctest: +SKIP
     >>> report.save('report.html', overwrite=True) # doctest: +SKIP
