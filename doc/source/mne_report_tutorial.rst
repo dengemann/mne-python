@@ -55,12 +55,14 @@ The Python interface
 
 The same functionality can also be achieved using the Python interface. Import
 the required functions:
+
 .. code:: Python
 
     >>> from mne.report import Report
     >>> from mne.datasets import sample
 
 Generate the report:
+
 .. code:: Python
 
     >>> path = sample.data_path()
@@ -72,6 +74,7 @@ Generate the report:
     Embedding : bootstrap.min.css
 
 Only include \*-eve.fif files in the report:
+
 .. code:: Python
 
     >>> report.parse_folder(data_path=path, pattern='*-eve.fif') # doctest: +SKIP
@@ -82,6 +85,7 @@ Only include \*-eve.fif files in the report:
     Rendering : .../MNE-sample-data/MEG/sample/sample_audvis_ecg-eve.fif
 
 Save the report as an html, but do not open the html in a browser:
+
 .. code:: Python
 
     >>> report.save('report.html', overwrite=True, open_browser=False) # doctest:+SKIP
@@ -89,6 +93,7 @@ Save the report as an html, but do not open the html in a browser:
 
 There is greater flexibility compared to the command line interface. 
 Custom plots can be added to the report. Let us first generate a custom plot:
+
 .. code:: Python
 
     >>> from mne import read_evokeds
