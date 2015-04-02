@@ -90,6 +90,7 @@ def _read_head_shape(fname):
         fid.seek(BTI.FILE_HS_N_DIGPOINTS)
         _n_dig_points = read_int32(fid)
         idx_points = read_double_matrix(fid, BTI.DATA_N_IDX_POINTS, 3)
+        import pdb;pdb.set_trace()
         dig_points = read_double_matrix(fid, _n_dig_points, 3)
 
     return idx_points, dig_points
@@ -121,18 +122,21 @@ def _convert_head_shape(idx_points, dig_points):
     t[1, 1] = dcos
     t[0, 3] = dt
 
-    dig_points_nm = np.dot(t[BTI.T_ROT_IX], dig_points.T).T
-    dig_points_nm += t[BTI.T_TRANS_IX].T
+    if dig_points is not None:
+        dig_points_nm = np.dot(t[BTI.T_ROT_IX], dig_points.T).T
+        dig_points_nm += t[BTI.T_TRANS_IX].T
+    else:
+        dig_points_nm = None
 
     return idx_points_nm, dig_points_nm, t
 
 
-def _setup_head_shape(fname, use_hpi=True):
+def _setup_head_shape(head_shape, use_hpi=True):
     """Read index points and dig points from BTi head shape file
 
     Parameters
     ----------
-    fname : str
+    head_shape : str
         The absolute path to the head shape file
 
     Returns
@@ -144,9 +148,20 @@ def _setup_head_shape(fname, use_hpi=True):
         Whether to treat additional hpi coils as digitization points or not.
         If False, hpi coils will be discarded.
     """
-    idx_points, dig_points = _read_head_shape(fname)
-    idx_points, dig_points, t = _convert_head_shape(idx_points, dig_points)
-    all_points = np.r_[idx_points, dig_points].astype('>f4')
+    dig_points, idx_points = None, None
+    if not isinstance(head_shape, np.ndarray):
+        idx_points, dig_points = _read_head_shape(head_shape)
+    elif isinstance(head_shape, np.ndarray):
+        if len(head_shape) == 3:
+            idx_points, dig_points, t = _convert_head_shape(
+                head_shape, dig_points)
+    else:
+        pass
+
+    if dig_points is not None:
+        all_points = np.r_[idx_points, dig_points].astype('>f4')
+    else:
+        all_points = idx_points.astype('>f4')
 
     idx_idents = list(range(1, 4)) + list(range(1, (len(idx_points) + 1) - 3))
     dig = []
@@ -971,13 +986,16 @@ class RawBTi(_BaseRaw):
                              ' whether you are in the right directory '
                              'or pass the full name' % config_fname)
 
-        if not op.isabs(head_shape_fname):
-            head_shape_fname = op.join(op.dirname(pdf_fname), head_shape_fname)
+        if not isinstance(head_shape_fname, np.ndarray):
+            if not op.isabs(head_shape_fname):
+                head_shape_fname = op.join(
+                    op.dirname(pdf_fname), head_shape_fname)
 
-        if not op.exists(head_shape_fname):
-            raise ValueError('Could not find the head_shape file %s. You shoul'
-                             'd check whether you are in the right directory o'
-                             'r pass the full file name.' % head_shape_fname)
+            if not op.exists(head_shape_fname):
+                raise ValueError(
+                    'Could not find the head_shape file %s. You should check '
+                    'whether you are in the right directory or pass the full '
+                    'file name.' % head_shape_fname)
 
         logger.info('Reading 4D PDF file %s...' % pdf_fname)
         bti_info = _read_bti_header(pdf_fname, config_fname)
