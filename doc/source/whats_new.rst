@@ -21,6 +21,8 @@ Changelog
 
     - Add support for scaling and adjusting the number of channels/time per view by `Jaakko Leppakangas`_
 
+    - Add ICA plotters for raw and epoch components by `Jaakko Leppakangas`_
+
 
 BUG
 ~~~
