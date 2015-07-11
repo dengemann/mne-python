@@ -9,15 +9,15 @@ clean the EEG data.
 
 References
 ----------
-[1] Nolan H., Whelan R. and Reilly RB. Engemann D. FASTER: fully automated
+[1] Nolan H., Whelan R. and Reilly RB. FASTER: fully automated
     statistical thresholding for EEG artifact rejection. Journal of
     Neuroscience Methods, vol. 192, issue 1, pp. 152-162, 2010.
 """
 import mne
 from mne import io
-from mne.preprocessing import (faster_bad_channels, faster_bad_epochs,
-                               faster_bad_components,
-                               faster_bad_channels_in_epochs, ICA)
+from mne.preprocessing import (detect_bad_channels, detect_bad_epochs,
+                               detect_bad_components,
+                               detect_bad_channels_in_epochs, ICA)
 from mne.datasets import sample
 
 # Load raw data
@@ -57,12 +57,12 @@ evoked_before = epochs_before.average()
 # Clean the data using FASTER
 
 # Step 1: mark bad channels
-epochs.info['bads'] = faster_bad_channels(epochs, thres=5)
+epochs.info['bads'] = detect_bad_channels(epochs, thres=5)
 if len(epochs.info['bads']) > 0:
     epochs.interpolate_bads_eeg()
 
 # Step 2: mark bad epochs
-bad_epochs = faster_bad_epochs(epochs, thres=3)
+bad_epochs = detect_bad_epochs(epochs, thres=3)
 
 # Reject bad epochs (keep good epochs)
 good_epochs = list(set(range(len(epochs))).difference(set(bad_epochs)))
@@ -73,12 +73,12 @@ epochs = epochs[good_epochs]
 picks = mne.pick_types(epochs.info, meg=True, eeg=True, eog=False, ecg=True,
                        exclude='bads')
 ica = ICA(n_components=0.95).fit(epochs, picks=picks)
-ica.exclude = faster_bad_components(ica, epochs, thres=5)
+ica.exclude = detect_bad_components(ica, epochs, thres=5)
 ica.apply(epochs)
 
 # Step 4: mark bad channels for each epoch and interpolate them. This is
 #         currently only implemented for EEG
-bad_channels_per_epoch = faster_bad_channels_in_epochs(epochs, thres=5)
+bad_channels_per_epoch = detect_bad_channels_in_epochs(epochs, thres=5)
 for i, b in enumerate(bad_channels_per_epoch):
     if len(b) > 0:
         epoch = epochs[i]

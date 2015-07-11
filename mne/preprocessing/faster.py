@@ -1,9 +1,12 @@
+# Authors: Marijn van Vliet <w.m.vanvliet@gmail.com>
+#          Denis Engemann <denis.engemann@gmail.com>
+#
+# License: Simplified BSD
+
 import numpy as np
 from collections import defaultdict
-from operator import add
 from scipy.signal import welch, lfilter
 from scipy.stats import kurtosis
-from functools import reduce
 from . import find_outliers
 from ..utils import logger
 from ..io.pick import pick_types, channel_type
@@ -162,7 +165,7 @@ def _deviation(data):
     return ch_mean - np.mean(ch_mean, axis=0)
 
 
-def faster_bad_channels(epochs, picks=None, thres=3, use_metrics=None,
+def detect_bad_channels(epochs, picks=None, thresh=3, use_metrics=None,
                         max_iter=2, return_by_metric=False):
     """Implements the first step of the FASTER algorithm.
 
@@ -176,7 +179,7 @@ def faster_bad_channels(epochs, picks=None, thres=3, use_metrics=None,
         The epochs for which bad channels need to be marked
     picks : list of int | None
         Channels to operate on. Defaults to EEG channels.
-    thres : float
+    thresh : float
         The threshold value, in standard deviations, to apply. A channel
         crossing this threshold value is marked as bad. Defaults to 3.
     use_metrics : list of str
@@ -224,7 +227,7 @@ def faster_bad_channels(epochs, picks=None, thres=3, use_metrics=None,
         for m in use_metrics:
             s = metrics[m](data[chs])
             b = [epochs.ch_names[picks[chs[i]]]
-                 for i in find_outliers(s, thres, max_iter)]
+                 for i in find_outliers(s, thresh, max_iter)]
             logger.info('\tBad by %s: %s' % (m, b))
             bads[m].append(b)
 
@@ -235,7 +238,7 @@ def faster_bad_channels(epochs, picks=None, thres=3, use_metrics=None,
         return np.unique(np.concatenate(list(bads.values()))).tolist()
 
 
-def faster_bad_epochs(epochs, picks=None, thres=3, use_metrics=None,
+def detect_bad_epochs(epochs, picks=None, thresh=3, use_metrics=None,
                       max_iter=2, return_by_metric=False):
     """Implements the second step of the FASTER algorithm.
 
@@ -248,7 +251,7 @@ def faster_bad_epochs(epochs, picks=None, thres=3, use_metrics=None,
         The epochs to analyze.
     picks : list of int | None
         Channels to operate on. Defaults to EEG channels.
-    thres : float
+    thresh : float
         The threshold value, in standard deviations, to apply. An epoch
         crossing this threshold value is marked as bad. Defaults to 3.
     use_metrics : list of str
@@ -287,7 +290,7 @@ def faster_bad_epochs(epochs, picks=None, thres=3, use_metrics=None,
         logger.info('Bad epoch detection on %s channels:' % ch_type.upper())
         for m in use_metrics:
             s = metrics[m](data[:, chs])
-            b = find_outliers(s, thres, max_iter)
+            b = find_outliers(s, thresh, max_iter)
             logger.info('\tBad by %s: %s' % (m, b))
             bads[m].append(b)
 
@@ -298,7 +301,7 @@ def faster_bad_epochs(epochs, picks=None, thres=3, use_metrics=None,
         return np.unique(np.concatenate(list(bads.values()))).tolist()
 
 
-def faster_bad_components(ica, epochs, thres=3, use_metrics=None,
+def detect_bad_components(ica, epochs, thresh=3, use_metrics=None,
                           power_gradient_range=None, max_iter=2,
                           return_by_metric=False):
     """Implements the third step of the FASTER algorithm.
@@ -312,7 +315,7 @@ def faster_bad_components(ica, epochs, thres=3, use_metrics=None,
         The ICA operator, already fitted to the supplied Epochs object.
     epochs : Instance of Epochs
         The untransformed epochs to analyze.
-    thres : float
+    thresh : float
         The threshold value, in standard deviations, to apply. A component
         crossing this threshold value is marked as bad. Defaults to 3.
     use_metrics : list of str
@@ -380,7 +383,7 @@ def faster_bad_components(ica, epochs, thres=3, use_metrics=None,
     for m in use_metrics:
         scores = np.atleast_2d(metrics[m](ica))
         for s in scores:
-            b = find_outliers(s, thres, max_iter)
+            b = find_outliers(s, thresh, max_iter)
             logger.info('Bad by %s:\n\t%s' % (m, b))
             bads[m] = b
 
@@ -390,7 +393,7 @@ def faster_bad_components(ica, epochs, thres=3, use_metrics=None,
         return np.unique(np.concatenate(list(bads.values()))).tolist()
 
 
-def faster_bad_channels_in_epochs(epochs, picks=None, thres=3,
+def detect_bad_channels_in_epochs(epochs, picks=None, thresh=3,
                                   use_metrics=None, max_iter=1,
                                   return_by_metric=False):
     """Implements the fourth step of the FASTER algorithm.
@@ -404,7 +407,7 @@ def faster_bad_channels_in_epochs(epochs, picks=None, thres=3,
         The epochs to analyze.
     picks : list of int | None
         Channels to operate on. Defaults to EEG channels.
-    thres : float
+    thresh : float
         The threshold value, in standard deviations, to apply. An epoch
         crossing this threshold value is marked as bad. Defaults to 3.
     use_metrics : list of str
@@ -451,13 +454,12 @@ def faster_bad_channels_in_epochs(epochs, picks=None, thres=3,
                         % ch_type.upper())
             s_epochs = metrics[metric](data[:, chs])
             for i_epochs, epoch in enumerate(s_epochs):
-                outliers = find_outliers(epoch, thres, max_iter)
+                outliers = find_outliers(epoch, thresh, max_iter)
                 if len(outliers) > 0:
                     bads_epoch = [ch_names[k] for k in outliers]
                     logger.info('Epoch %d, Bad by %s:\n\t%s' % (
                         i_epochs, metric, bads_epoch))
                     bads[metric][i_epochs, chs[outliers]] = True
-
 
     if return_by_metric:
         bads = dict((m, [np.where(b)[0] for b in v]) for m, v in bads.items())

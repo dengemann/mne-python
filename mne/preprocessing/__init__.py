@@ -16,5 +16,5 @@ from .ica import (ICA, ica_find_eog_events, ica_find_ecg_events,
 from .bads import find_outliers
 from .stim import fix_stim_artifact
 from .maxwell import maxwell_filter
-from .faster import (faster_bad_channels, faster_bad_epochs,
-                     faster_bad_components, faster_bad_channels_in_epochs)
+from .faster import (detect_bad_channels, detect_bad_epochs,
+                     detect_bad_components, detect_bad_channels_in_epochs)
