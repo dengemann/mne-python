@@ -29,7 +29,7 @@ def _hurst(x):
 
     Parameters
     ----------
-    x : 1D numpy array
+    x : array, shape(n_channels, n_samples)
         The timeseries to estimate the Hurst exponent for.
 
     Returns
@@ -63,17 +63,17 @@ def _efficient_welch(data, sfreq):
 
     Parameters
     ----------
-    data : N-D numpy array
+    data : array, shape (..., n_samples)
         The timeseries to estimate signal power for. The last dimension
-        is presumed to be time.
+        is assumed to be time.
     sfreq : float
         The sample rate of the timeseries.
 
     Returns
     -------
-    fs : 1D numpy array
+    fs : array of float
         The frequencies for which the power spectra was calculated.
-    ps : ND numpy array
+    ps : array, shape (..., frequencies)
         The power spectra for each timeseries.
     """
     nperseg = min(data.shape[-1],
@@ -87,18 +87,18 @@ def _freqs_power(data, sfreq, freqs):
 
     Parameters
     ----------
-    data : N-D numpy array
+    data : array, shape (..., n_samples)
         The timeseries to estimate signal power for. The last dimension
         is presumed to be time.
     sfreq : float
         The sample rate of the timeseries.
-    freqs : list of float
+    freqs : array of float
         The frequencies to estimate signal power for.
 
     Returns
     -------
-    ps : list of float
-        For each requested frequency, the estimated signal power.
+    p : float
+        The summed signal power of each requested frequency.
     """
     fs, ps = _efficient_welch(data, sfreq)
     try:
@@ -115,7 +115,7 @@ def _power_gradient(data, sfreq, prange):
 
     Parameters
     ----------
-    data : N-D numpy array
+    data : array, shape (n_components, n_samples)
         The timeseries to estimate signal power for. The last dimension
         is presumed to be time.
     sfreq : float
@@ -126,12 +126,12 @@ def _power_gradient(data, sfreq, prange):
 
     Returns
     -------
-    grad : N-D numpy array
-        The gradients of each timeseries.
+    grad : array of float
+        The gradients of the timeseries.
     """
     fs, ps = _efficient_welch(data, sfreq)
 
-    # Limit power spectrum to upper frequencies
+    # Limit power spectrum to selected frequencies
     start, stop = (np.searchsorted(fs, p) for p in prange)
     if start >= ps.shape[1]:
         raise ValueError(("Sample rate insufficient to estimate {} Hz power. "
@@ -153,12 +153,12 @@ def _deviation(data):
 
     Parameters
     ----------
-    data : 3D numpy array
-        The epochs (#epochs x #channels x #samples).
+    data : array, shape (n_epochs, n_channels, n_samples)
+        The epochs for which to compute the channel deviation.
 
     Returns
     -------
-    dev : 1D numpy array
+    dev : list of float
         For each epoch, the mean deviation of the channels.
     """
     ch_mean = np.mean(data, axis=2)
@@ -229,6 +229,7 @@ def detect_bad_channels(epochs, picks=None, thresh=3, use_metrics=None,
             b = [epochs.ch_names[picks[chs[i]]]
                  for i in find_outliers(s, thresh, max_iter)]
             logger.info('\tBad by %s: %s' % (m, b))
+            print s
             bads[m].append(b)
 
     bads = dict([(k, np.concatenate(v).tolist()) for k, v in bads.items()])
