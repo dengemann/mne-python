@@ -9,17 +9,12 @@ from scipy.signal import welch, lfilter
 from scipy.stats import kurtosis
 from . import find_outliers
 from ..utils import logger
-from ..io.pick import pick_types, channel_type
+from ..io.pick import pick_types, channel_type, _picks_by_type
 
 
 def _by_ch_type(info, picks):
     """Returns lists of channel indices, grouped by channel type."""
-    ch_types = defaultdict(list)
-
-    for ch in picks:
-        ch_types[channel_type(info, ch)].append(ch)
-
-    return ch_types.items()
+    return _picks_by_type(pick_info(info, picks))
 
 
 def _hurst(x):
@@ -224,15 +219,14 @@ def detect_bad_channels(epochs, picks=None, thresh=3, use_metrics=None,
     bads = defaultdict(list)
     for ch_type, chs in _by_ch_type(epochs.info, picks):
         logger.info('Bad channel detection on %s channels:' % ch_type.upper())
-        for m in use_metrics:
-            s = metrics[m](data[chs])
-            b = [epochs.ch_names[picks[chs[i]]]
-                 for i in find_outliers(s, thresh, max_iter)]
-            logger.info('\tBad by %s: %s' % (m, b))
-            print s
-            bads[m].append(b)
+        for metric in use_metrics:
+            scores = metrics[metric](data[chs])
+            bads = [epochs.ch_names[picks[chs[i]]]
+                 for i in find_outliers(scores, thresh, max_iter)]
+            logger.info('\tBad by %s: %s' % (metric, bads))
+            bads[metric].append(bads)
 
-    bads = dict([(k, np.concatenate(v).tolist()) for k, v in bads.items()])
+    bads = dict((k, np.concatenate(v).tolist()) for k, v in bads.items())
     if return_by_metric:
         return bads
     else:
@@ -289,17 +283,17 @@ def detect_bad_epochs(epochs, picks=None, thresh=3, use_metrics=None,
     bads = defaultdict(list)
     for ch_type, chs in _by_ch_type(epochs.info, picks):
         logger.info('Bad epoch detection on %s channels:' % ch_type.upper())
-        for m in use_metrics:
-            s = metrics[m](data[:, chs])
-            b = find_outliers(s, thresh, max_iter)
-            logger.info('\tBad by %s: %s' % (m, b))
+        for metric in use_metrics:
+            scores = metrics[metric](data[:, chs])
+            bads = find_outliers(scores, thresh, max_iter)
+            logger.info('\tBad by %s: %s' % (metric, bads))
             bads[m].append(b)
 
-    bads = {k: np.concatenate(v).tolist() for k, v in bads.items()}
+    bads = dict((k, np.concatenate(v).tolist()) for k, v in bads.items())
     if return_by_metric:
         return bads
     else:
-        return np.unique(np.concatenate(list(bads.values()))).tolist()
+        return np.unique(np.concatenate(bads.values())).tolist()
 
 
 def detect_bad_components(ica, epochs, thresh=3, use_metrics=None,
@@ -363,15 +357,13 @@ def detect_bad_components(ica, epochs, thresh=3, use_metrics=None,
     metrics = {
         'eog_correlation': lambda x: x.find_bads_eog(epochs)[1],
         'kurtosis': lambda x: kurtosis(transform_matrix, axis=1),
-        'power_gradient': lambda x: _power_gradient(source_data,
-                                                    x.info['sfreq'],
-                                                    power_gradient_range),
+        'power_gradient': lambda x: _power_gradient(
+            source_data, x.info['sfreq'], power_gradient_range),
         'hurst': lambda x: _hurst(source_data),
         'median_gradient': lambda x: np.median(np.abs(np.diff(source_data)),
                                                axis=1),
-        'line_noise': lambda x: _freqs_power(source_data,
-                                             epochs.info['sfreq'],
-                                             [50, 60]),
+        'line_noise': lambda x: _freqs_power(
+            source_data, epochs.info['sfreq'], [50, 60])
     }
 
     if use_metrics is None:
@@ -381,12 +373,12 @@ def detect_bad_components(ica, epochs, thresh=3, use_metrics=None,
             use_metrics.remove('eog_correlation')
 
     bads = dict()
-    for m in use_metrics:
-        scores = np.atleast_2d(metrics[m](ica))
-        for s in scores:
-            b = find_outliers(s, thresh, max_iter)
-            logger.info('Bad by %s:\n\t%s' % (m, b))
-            bads[m] = b
+    for metric in use_metrics:
+        scores = np.atleast_2d(metrics[metric](ica))
+        for score in scores:
+            bads = find_outliers(score, thresh, max_iter)
+            logger.info('Bad by %s:\n\t%s' % (metric, bads))
+            bads[metric] = bads
 
     if return_by_metric:
         return bads
