@@ -972,10 +972,11 @@ class RawBTi(_BaseRaw):
                              ' whether you are in the right directory '
                              'or pass the full name' % config_fname)
 
-        if not op.isabs(head_shape_fname):
+        # bypass for HCP data
+        if head_shape_fname is not None and not op.isabs(head_shape_fname):
             head_shape_fname = op.join(op.dirname(pdf_fname), head_shape_fname)
 
-        if not op.exists(head_shape_fname):
+        if head_shape_fname is not None and not op.exists(head_shape_fname):
             raise ValueError('Could not find the head_shape file %s. You shoul'
                              'd check whether you are in the right directory o'
                              'r pass the full file name.' % head_shape_fname)
@@ -1082,15 +1083,20 @@ class RawBTi(_BaseRaw):
 
         info['chs'] = chs
 
-        logger.info('... Reading digitization points from %s' %
-                    head_shape_fname)
-        logger.info('... putting digitization points in Neuromag c'
-                    'oordinates')
-        info['dig'], ctf_head_t = _setup_head_shape(head_shape_fname, use_hpi)
-        logger.info('... Computing new device to head transform.')
-        dev_head_t = _convert_dev_head_t(dev_ctf_t, bti_to_nm,
-                                         ctf_head_t)
-
+        if head_shape_fname is not None:
+            logger.info('... Reading digitization points from %s' %
+                        head_shape_fname)
+            logger.info('... putting digitization points in Neuromag c'
+                        'oordinates')
+            info['dig'], ctf_head_t = _setup_head_shape(
+                head_shape_fname, use_hpi)
+            logger.info('... Computing new device to head transform.')
+            dev_head_t = _convert_dev_head_t(dev_ctf_t, bti_to_nm,
+                                             ctf_head_t)
+        else:
+            info['dig'] = []
+            dev_head_t = bti_identity_trans()
+            ctf_head_t = bti_identity_trans()
         info['dev_head_t'] = {'from': FIFF.FIFFV_COORD_DEVICE,
                               'to': FIFF.FIFFV_COORD_HEAD,
                               'trans': dev_head_t}
