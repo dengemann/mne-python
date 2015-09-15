@@ -965,7 +965,7 @@ class RawBTi(_BaseRaw):
             pdf_fname = op.abspath(pdf_fname)
 
         if not op.isabs(config_fname):
-            config_fname = op.join(op.dirname(pdf_fname), config_fname)
+            config_fname = op.abspath(config_fname)
 
         if not op.exists(config_fname):
             raise ValueError('Could not find the config file %s. Please check'
