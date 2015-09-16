@@ -439,7 +439,6 @@ def make_forward_solution(info, trans, src, bem, fname=None, meg=True,
     # read the transformation from MRI to HEAD coordinates
     # (could also be HEAD to MRI)
     mri_head_t, trans = _get_mri_head_t(trans)
-    import pdb; pdb.set_trace()
     
     if not isinstance(src, string_types):
         if not isinstance(src, SourceSpaces):
