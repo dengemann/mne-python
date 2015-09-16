@@ -171,17 +171,14 @@ def _setup_head_shape(fname, use_hpi=True):
     return dig, t
 
 
-def _convert_coil_trans(coil_trans, bti_trans, bti_to_nm):
+def _coil_trans_to_loc(trans):
+    """flatten the coil trans and extract sensor positions"""
+    return np.roll(trans.copy().T, 1, 0)[:, :3].flatten()
+
+
+def _convert_dev_head_t(bti_trans, bti_to_neuromag, m_h_nm_h):
     """ Helper Function """
-    t = bti_to_vv_coil_trans(coil_trans, bti_trans, bti_to_nm)
-    loc = np.roll(t.copy().T, 1, 0)[:, :3].flatten()
-
-    return t, loc
-
-
-def _convert_dev_head_t(bti_trans, bti_to_nm, m_h_nm_h):
-    """ Helper Function """
-    nm_to_m_sensor = inverse_trans(bti_identity_trans(), bti_to_nm)
+    nm_to_m_sensor = inverse_trans(bti_identity_trans(), bti_to_neuromag)
     nm_sensor_m_head = merge_trans(bti_trans, nm_to_m_sensor)
 
     nm_dev_head_t = merge_trans(m_h_nm_h, nm_sensor_m_head)
@@ -959,7 +956,8 @@ class RawBTi(_BaseRaw):
     def __init__(self, pdf_fname, config_fname='config',
                  head_shape_fname='hs_file', rotation_x=None,
                  translation=(0.0, 0.02, 0.11), ecg_ch='E31',
-                 eog_ch=('E63', 'E64'), verbose=None):
+                 eog_ch=('E63', 'E64'), convert_to_neuromag=True,
+                 verbose=None):
 
         if not op.isabs(pdf_fname):
             pdf_fname = op.abspath(pdf_fname)
@@ -985,9 +983,13 @@ class RawBTi(_BaseRaw):
         bti_info = _read_bti_header(pdf_fname, config_fname)
 
         # XXX indx is informed guess. Normally only one transform is stored.
-        dev_ctf_t = bti_info['bti_transform'][0].astype('>f8')
-        bti_to_nm = bti_to_vv_trans(adjust=rotation_x,
-                                    translation=translation, dtype='>f8')
+        orig_device_to_head = bti_info['bti_transform'][0].astype('>f8')
+        if convert_to_neuromag:
+            bti_to_neuromag = bti_to_vv_trans(
+                adjust=rotation_x, translation=translation, dtype='>f8')
+        else:
+            bti_to_neuromag = bti_identity_trans()
+        # Should be identity in HCP mode.
 
         use_hpi = False  # hard coded, but marked as later option.
         logger.info('Creating Neuromag info structure ...')
@@ -1028,16 +1030,21 @@ class RawBTi(_BaseRaw):
             chan_info['cal'] = bti_info['chs'][idx]['scale']
 
             if any(chan_vv.startswith(k) for k in ('MEG', 'RFG', 'RFM')):
-                t, loc = bti_info['chs'][idx]['coil_trans'], None
-                if t is not None:
-                    t, loc = _convert_coil_trans(t.astype('>f8'), dev_ctf_t,
-                                                 bti_to_nm)
-                    if idx == 1:
-                        logger.info('... putting coil transforms in Neuromag '
-                                    'coordinates')
-                chan_info['coil_trans'] = t
-                if loc is not None:
-                    chan_info['loc'] = loc.astype('>f4')
+                coil_trans = bti_info['chs'][idx]['coil_trans']
+
+                if coil_trans is not None:
+                    coil_trans = coil_trans.astype('>f8')
+                    if convert_to_neuromag:
+                        coil_trans = bti_to_vv_coil_trans(
+                            coil_trans, orig_device_to_head, bti_to_neuromag)
+                        if idx == 0:
+                            logger.info(
+                                '... putting coil transforms in Neuromag '
+                                'coordinates')
+                    chan_info['loc'] = _coil_trans_to_loc(
+                        coil_trans).astype('>f4')
+
+                chan_info['coil_trans'] = coil_trans
 
             if chan_vv.startswith('MEG'):
                 chan_info['kind'] = FIFF.FIFFV_MEG_CH
@@ -1083,29 +1090,35 @@ class RawBTi(_BaseRaw):
 
         info['chs'] = chs
 
-        if head_shape_fname is not None:
+        if head_shape_fname is not None and convert_to_neuromag:
             logger.info('... Reading digitization points from %s' %
                         head_shape_fname)
             logger.info('... putting digitization points in Neuromag c'
                         'oordinates')
-            info['dig'], ctf_head_t = _setup_head_shape(
+            info['dig'], orig_head_trans = _setup_head_shape(
                 head_shape_fname, use_hpi)
             logger.info('... Computing new device to head transform.')
-            dev_head_t = _convert_dev_head_t(dev_ctf_t, bti_to_nm,
-                                             ctf_head_t)
+            new_device_to_head = _convert_dev_head_t(
+                orig_device_to_head, bti_to_neuromag, orig_head_trans)
         else:
-            info['dig'] = []
-            dev_head_t = bti_identity_trans()
-            ctf_head_t = bti_identity_trans()
-        info['dev_head_t'] = {'from': FIFF.FIFFV_COORD_DEVICE,
-                              'to': FIFF.FIFFV_COORD_HEAD,
-                              'trans': dev_head_t}
-        info['dev_ctf_t'] = {'from': FIFF.FIFFV_MNE_COORD_CTF_DEVICE,
-                             'to': FIFF.FIFFV_COORD_HEAD,
-                             'trans': dev_ctf_t}
-        info['ctf_head_t'] = {'from': FIFF.FIFFV_MNE_COORD_CTF_HEAD,
-                              'to': FIFF.FIFFV_COORD_HEAD,
-                              'trans': ctf_head_t}
+            logger.info('Not converting to Neuromag.')
+            info['dig'] = list()
+            new_device_to_head = orig_device_to_head
+            orig_head_trans = bti_identity_trans()
+        info['dev_head_t'] = {  # XXX declaration as MNE native expected
+            'from': FIFF.FIFFV_COORD_DEVICE,
+            'to': FIFF.FIFFV_COORD_HEAD,
+            'trans': new_device_to_head}
+
+        info['dev_ctf_t'] = {
+            'from': FIFF.FIFFV_MNE_COORD_CTF_DEVICE,
+            'to': FIFF.FIFFV_COORD_HEAD,
+            'trans': orig_device_to_head}
+        info['ctf_head_t'] = {
+            'from': FIFF.FIFFV_MNE_COORD_CTF_HEAD,
+            'to': (FIFF.FIFFV_COORD_HEAD if convert_to_neuromag else
+                   FIFF.FIFFV_MNE_COORD_CTF_HEAD),
+            'trans': orig_head_trans}
         logger.info('Done.')
 
         if False:  # XXX : reminds us to support this as we go
@@ -1162,7 +1175,8 @@ class RawBTi(_BaseRaw):
 def read_raw_bti(pdf_fname, config_fname='config',
                  head_shape_fname='hs_file', rotation_x=None,
                  translation=(0.0, 0.02, 0.11), ecg_ch='E31',
-                 eog_ch=('E63', 'E64'), verbose=None):
+                 eog_ch=('E63', 'E64'), convert_to_neuromag=True,
+                 verbose=None):
     """ Raw object from 4D Neuroimaging MagnesWH3600 data
 
     Note.
@@ -1212,4 +1226,5 @@ def read_raw_bti(pdf_fname, config_fname='config',
     return RawBTi(pdf_fname, config_fname=config_fname,
                   head_shape_fname=head_shape_fname,
                   rotation_x=rotation_x, translation=translation,
+                  convert_to_neuromag=convert_to_neuromag,
                   verbose=verbose)
