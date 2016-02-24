@@ -1237,7 +1237,7 @@ class ICA(ContainsMixin):
                             self.pca_components_[:n_components])
         mixing = linalg.pinv(unmixing)
 
-        proj_mat = np.eye(len(self.pca_components_))
+        proj_mat = np.eye(self.pca_components_.shape[1])
         if len(sel_reject) > 0:
             logger.info('Zeroing out %i ICA components' % len(sel_reject))
             proj_mat -= np.dot(mixing[:, sel_reject], unmixing[sel_reject])
