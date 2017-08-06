@@ -107,6 +107,7 @@ time_decod.fit(X, y)
 # Retrieve patterns after inversing the z-score normalization step:
 patterns = get_coef(time_decod, 'patterns_', inverse_transform=True)
 
+stc = stcs[0]  # for convenience lookup things from firs stc
 vertices = [stc.lh_vertno, np.array([], int)]  # empty array for right hemi
 stc_feat = mne.SourceEstimate(np.abs(patterns), vertices=vertices,
                               tmin=stc.tmin, tstep=stc.tstep,
